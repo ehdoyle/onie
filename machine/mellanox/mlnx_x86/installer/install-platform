@@ -2,19 +2,39 @@
 
 check_machine_image()
 {
-    onie_mlnx_machine_dflt=mlnx_x86
-    vendor_onie_machine=$(echo $onie_build_machine | awk '{print substr($1,1,4)}')
+    onie_mlnx_vendor_id=33049
     if [ "$onie_build_machine" != "$image_build_machine" ] ; then
-        if [ "$image_build_machine" != "$onie_mlnx_machine_dflt" ] || [ "$vendor_onie_machine" != "mlnx" ] ; then
+        if [ "$onie_vendor_id" != "$onie_mlnx_vendor_id" ] ; then
 		fail=yes
 	fi
     fi
     if [ "$onie_machine_rev" != "$image_machine_rev" ] ; then
-	if [ "$image_build_machine" != "$onie_mlnx_machine_dflt" ] || [ "$vendor_onie_machine" != "mlnx" ] ; then
+	if [ "$onie_vendor_id" != "$onie_mlnx_vendor_id" ] ; then
 		fail=yes
 	fi
     fi
     if [ "$onie_arch" != "$image_arch" ] ; then
         fail=yes
+    fi
+}
+
+update_syseeprom()
+{
+    # Set platform name and ONIE version to sys_eeprom.
+    if [ -x /usr/bin/onie-syseeprom ] ; then
+        onie-syseeprom -g 0x29 > /dev/null 2>&1 || {
+            echo "WARNING: sys_eeprom is not in ONIE format"
+            return 0
+        }
+        local syseeprom_log=$(mktemp)
+        onie-syseeprom \
+            -s 0x29="$image_version" \
+            > $syseeprom_log 2>&1 || {
+            echo "ERROR: Problems accessing sys_eeprom"
+            cat $syseeprom_log && rm -f $syseeprom_log
+            exit 1
+        }
+        [ "$verbose" = "yes" ] && cat $syseeprom_log
+        rm -f $syseeprom_log
     fi
 }

@@ -1,4 +1,9 @@
-onie_mlnx_machine_dflt=mlnx_x86
+# Copyright (C) 2019 Mellanox Technoligies Ltd.
+# Copyright (C) 2019 Michael Shych <michaelsh@mellanox.com>
+#
+# SPDX-License-Identifier:      GPL-2.0
+
+onie_mlnx_vendor_id=33049
 
 set_onie_machine()
 {
@@ -20,18 +25,30 @@ set_onie_machine()
     tarantula)
         live_machine=mlnx_msx1410
         ;;
+    eagle)
+        live_machine=mlnx_msb7800
+        ;;
+    # Case for systems with corrupted SMBios info.
+    error:)
+	live_machine=$(cat /etc/machine-build.conf | grep 'onie_build_machine=' | cut -d "=" -f 2)
+        ;;
     *)
         machine_name=$(echo "$machine_model" | awk -F'-' '{print $1}')
         machine_suffix=$(echo "$machine_model" | awk -F'-' '{print $2}')
-        live_machine=mlnx_$machine_name$machine_suffix
+	tmp=$(onie-syseeprom -g 0x2b | awk '{print $1}')
+        manufacturer=$(echo "$tmp" | awk '{print tolower($0)}')
+        if [ "$manufacturer" = "mellanox" ]; then
+                manufacturer=mlnx
+        fi
+        live_machine=$manufacturer"_"$machine_name$machine_suffix
         ;;
     esac
 }
 
 gen_live_config()
 {
-    onie_build_machine=$(cat /etc/machine-build.conf | grep 'onie_build_machine=' | cut -d "=" -f 2)
-    if [ "$onie_build_machine" = "$onie_mlnx_machine_dflt" ]; then
+    onie_vendor_id=$(cat /etc/machine-build.conf | grep 'onie_vendor_id=' | cut -d "=" -f 2)
+    if [ "$onie_vendor_id" = "$onie_mlnx_vendor_id" ]; then
         set_onie_machine
     fi
 
@@ -42,6 +59,7 @@ gen_live_config()
 # Runtime ONIE Machine
 onie_machine=$live_machine
 onie_platform=${onie_arch}-${live_machine}-r${onie_machine_rev}
+onie_base_mac=$(onie-syseeprom -g 0x24 | awk '{print $1}' | awk '{print tolower($0)}')
 EOF
     fi
 }

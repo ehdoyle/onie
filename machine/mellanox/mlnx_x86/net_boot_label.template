@@ -95,11 +95,11 @@ update_pxe_label()
 	sudo sh -c "echo \"
 LABEL ${PXE_LABEL}_rescue
         kernel ${FILE_PATH}/${VMLINUZ}
-        append initrd=${FILE_PATH}/${INITRD} panic=10 noexec=off console=ttyS0,115200n8 ramdisk_size=1048576 root=/dev/ram boot_reason=rescue boot_env=recovery acpi_enforce_resources=no nmi_watchdog=0
+        append initrd=${FILE_PATH}/${INITRD} panic=10 noexec=off console=ttyS0,115200n8 ramdisk_size=1048576 root=/dev/ram boot_reason=rescue boot_env=recovery nmi_watchdog=0
 
 LABEL ${PXE_LABEL}
         kernel ${FILE_PATH}/${VMLINUZ}
-        append initrd=${FILE_PATH}/recovery-x86_64-${INITRD} panic=10 noexec=off console=ttyS0,115200n8 ramdisk_size=1048576 root=/dev/ram boot_reason=embed install_url=file:///lib/onie/onie-updater boot_env=recovery acpi_enforce_resources=no nmi_watchdog=0
+        append initrd=${FILE_PATH}/recovery-x86_64-${INITRD} panic=10 noexec=off console=ttyS0,115200n8 ramdisk_size=1048576 root=/dev/ram boot_reason=embed install_url=file:///lib/onie/onie-updater boot_env=recovery nmi_watchdog=0
 \" >> $PXE_FILE"
 }
 
