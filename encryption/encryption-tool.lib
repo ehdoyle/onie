@@ -1,0 +1,1856 @@
+#
+# Secure boot specific functions for KVM.
+#
+
+#
+# Files of interest
+#
+
+
+# onie/encryption
+CRYPTO_DIR=$(pwd)
+
+# Signed SHIMs and stuff reside here
+# change as needed
+SAFE_PLACE="${CRYPTO_DIR}/safe-place"
+
+# Where the signing keys are kept - this is obviously KVM specific
+SECURE_KEY_STORAGE="${ONIE_TOP_DIR}/machine/${ONIE_MACHINE_TARGET}/x509"
+
+
+# Default to the secure boot generation
+BUILD_SECURE_BOOT=""
+
+
+HW_VENDOR_PREFIX="hw-vendor"
+SW_VENDOR_PREFIX="sw-vendor"
+ONIE_VENDOR_PREFIX="onie-vendor"
+
+# Put user generated keys here
+NEW_KEYS_DIR="${CRYPTO_DIR}/keys"
+# Store KEK and DB efi vars generated from keys here
+EFI_VARS_DIR="${NEW_KEYS_DIR}/efiVars"
+
+# A file of paths to all keys used.
+KEY_CONFIG_FILE=""
+DEFAULT_KEY_CONFIG_FILE="${NEW_KEYS_DIR}/default-keys.csv"
+#
+# Use existing USB_XFER_DIR to host keys that will have to be programmed
+# in to the UEFI bios
+#
+
+USB_XFER_KEY_DIR="${USB_XFER_DIR}/keys"
+USB_XFER_HW_KEY_DIR="${USB_XFER_KEY_DIR}/${HW_VENDOR_PREFIX}"
+USB_XFER_SW_KEY_DIR="${USB_XFER_KEY_DIR}/${SW_VENDOR_PREFIX}"
+USB_XFER_ONIE_KEY_DIR="${USB_XFER_KEY_DIR}/${ONIE_VENDOR_PREFIX}"
+
+KEY_EFI_BINARIES_DIR="${NEW_KEYS_DIR}/efi-binaries"
+KEY_UTILITIES_DIR="${NEW_KEYS_DIR}/utilities"
+
+# UEFI script to set kek and db
+UEFI_WRITE_KEYS_SCRIPT="${NEW_KEYS_DIR}/write-keys.nsh"
+# User instructions to read for UEFI
+UEFI_INSTRUCTIONS_TXT="ReadmeUEFI.txt"
+
+
+
+
+#
+# Is a file signed, and can it be validated?
+# Takes:
+#  Name of file to check for signature
+#  Certificate to check against signature
+#  'verbose' as 3rd parameter for more output.
+#
+function fxnShowSigningInfo()
+{
+    local file="$1"
+    local certificate="$2"
+    local verbose="$3"
+
+    local sbOutput
+
+    if [ "$verbose" = "verbose" ];then
+        echo ""
+        echo "-- Signing information for [ $1 ]"
+        echo ""
+    fi
+
+    sbOutput=$( sbverify --list $file )
+    if [ $? != "0" ];then
+        if [ "$verbose" = "verbose" ];then
+            echo""
+            echo "-- File is NOT signed."
+            echo ""
+        fi
+        return 1
+    fi
+    # Use sed to indent sbverify output for readability, after error checking.
+    if [ "$verbose" = "verbose" ];then
+        echo "$sbOutput" | sed -e 's/^/    /g'
+        echo ""
+    fi
+    if [ "$verbose" = "verbose" ];then
+        sbverify --cert $certificate $file
+    else
+        # This kicks out the failure of each cert we try.
+        # Bury it, as we only care about the one that works, if it does.
+        sbverify --cert $certificate $file 2>&1 > /dev/null
+    fi
+    if [ $? != "0" ];then
+        if [ "$verbose" = "verbose" ];then
+            echo ""
+            echo "-- FAILED to validate signature with certificate [ $2 ]"
+        fi
+        return 2
+    fi
+    echo "-- VALID. File [ $1 ] was signed with "
+    echo "   certificate [ $2 ]."
+    echo ""
+    return 0
+}
+
+#
+# Check all known keys against the file
+# Takes:
+#   Path to file to check for signing.
+function fxnSearchForSigningKey()
+{
+    local checkFile="$1"
+    local verbose="$2"
+    local result
+    local signingOutput
+
+
+    # may have to apt-get install pesign
+    # pesign -S -i="$checkFile"
+
+    # Dump pem
+    # openssl x509 -in foo.pem -noout -text
+
+    # remove a signature
+    # pesign -r -i=shimx64.efi -o=shimx64.efi
+
+    #
+    # Go through all existing certificates to find a match.
+    #
+    if [ -e "$NEW_KEYS_DIR" ];then
+        pemCertificates=$( find $NEW_KEYS_DIR -iname \*-key-cert.pem )
+
+        for cert in $pemCertificates ; do
+            #           signingOutput=$( fxnShowSigningInfo "$checkFile" "$cert" )
+            fxnShowSigningInfo "$checkFile" "$cert" "$verbose"
+            result="$?"
+            case $result in
+                0 )
+                    echo "$signingOutput"
+                    return 0
+                    ;;
+
+                1 )
+                    # File is not signed at all. Give up now.
+                    return 1
+                    ;;
+
+            esac
+        done
+    fi
+    echo "$signingOutput"
+    return 1
+}
+
+#
+# Wrap the search for a file's key
+# Takes:
+#   Path to file to check for signing
+function fxnVerifyFileSigning()
+{
+    local theFile="$1"
+    local verbose="$2"
+    #   echo "Checking $theFile "
+    fxnSearchForSigningKey "$theFile" $verbose
+    if [ $? != "0" ];then
+        echo "FAILED to match a key to [ $theFile ]"
+        return 1
+    fi
+    return 0
+}
+#
+# Print the keys that all signed objects have been signed with
+#
+
+function fxnVerifySigned() {
+    #   local grubEFI=
+
+    local found="FALSE"
+    local theFile
+	local verbose="not-verbose"
+    #local verbose="verbose"	
+    if [ -e "$NEW_KEYS_DIR" ];then
+        echo "###################################################"
+        echo "# Checking with keys under:                        "
+		echo "#  [ $NEW_KEYS_DIR ]"
+		echo "#"
+        echo "###################################################"
+
+        echo "#--------------------------------------------------"
+        echo "# Checking grubx64.efi"
+        echo "#--------------------------------------------------"
+        fxnEC fxnVerifyFileSigning  "${BUILD_DIR}/${ONIE_MACHINE}/grubx64.efi" $verbose || exit 1
+
+        echo "#--------------------------------------------------"
+        echo "# Checking vmlinuz.efi"
+        echo "#--------------------------------------------------"
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/images/${ONIE_MACHINE}.vmlinuz" $verbose || exit 1
+
+        echo "#--------------------------------------------------"
+        echo "# Checking shimx64.efi"
+        echo "#--------------------------------------------------"
+
+        # Shim gets signed with SHIM_SELF_SIGN_SECRET_KEY
+        # verify with  SW-database-key-cert.pem
+		#        fxnEC fxnVerifyFileSigning "${SAFE_PLACE}/shimx64.efi"  $verbose  || exit 1
+#		if [ ! -e "${BUILD_DIR}/${ONIE_MACHINE}/shim/install/shimx64.efi.signed" ];then
+#			echo "Failed to find shimx64.efi.signed. Run make shim-self-sign? Exiting."
+#		fi
+        fxnEC fxnVerifyFileSigning "${SAFE_PLACE}/shimx64.efi.signed"  $verbose  || exit 1		
+        echo "^^^Ignore section table gap warning."
+    else
+        echo "Failed to find keys to reference at [ $NEW_KEYS_DIR ]"
+    fi
+
+    # Anything in the build area?
+    if [ -e "${BUILD_DIR}/${ONIE_MACHINE}/recovery/" ];then
+        echo "#--------------------------------------------------"
+        echo "# Build area found at [ ${BUILD_DIR}/${ONIE_MACHINE}/recovery/ ]"
+        echo "#--------------------------------------------------"
+
+        echo "#--------------------------------------------------"
+        echo "#  Build area grubx64.efi"
+        echo "#--------------------------------------------------"
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/grubx64.efi" $verbose || exit 1
+
+        # This is the renamed, signed shim
+        echo "#--------------------------------------------------"
+        echo "#  Build area shimx64.efi, renamed to bootx64.efi"
+        echo "#--------------------------------------------------"
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/bootx64.efi" $verbose || exit 1
+
+
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/shim/install/shimx64.efi" $verbose || exit 1
+        # kernel
+        echo "#--------------------------------------------------"
+        echo "#  Build area vmlinuz.efi"
+        echo "#--------------------------------------------------"
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz" $verbose || exit 1
+    fi
+
+
+    echo "#--------------------------------------------------"
+    echo "#  UEFI BIOS keys"
+    echo "#--------------------------------------------------"
+	echo ""
+    echo "# are in ${EFI_VARS_DIR}"
+	ls -l ${EFI_VARS_DIR}
+
+	USB_DATA_DIR="../emulation/emulation-files/usb/usb-data/"
+	if [ -e "$USB_DATA_DIR" ];then
+		echo " Emulation directories exist. Checking UEFI variable staging..."
+		if [ -e "${USB_DATA_DIR}/keys/efiVars/" ];then
+			diff -q "${USB_DATA_DIR}/keys/efiVars/db-all.auth" "${EFI_VARS_DIR}/db-all.auth"
+			if [ $? = 0 ];then
+				echo "  db-all.auth  in virtual USB drive matches the one in $EFI_VARS_DIR"
+			else
+				echo "  db-all.auth  in virtual USB drive does NOT match the one in $EFI_VARS_DIR"				
+			fi
+			diff -q "${USB_DATA_DIR}/keys/efiVars/kek-all.auth" "${EFI_VARS_DIR}/kek-all.auth"
+			if [ $? = 0 ];then
+				echo "  kek-all.auth in virtual USB drive matches the one in $EFI_VARS_DIR"
+			else
+				echo "  kek-all.auth in virtual USB drive does NOT match the one in $EFI_VARS_DIR"				
+			fi
+		fi
+		echo ""
+	else
+		echo "No efi varaibles have been copied to the virtual USB drive."
+	fi
+
+    #fxnEC fxnVerifyFileSigning "${BUILD_DIR}/user/x86_64-g8.3.0-lnx5.4.86-uClibc-ng-1.0.35/dev-sysroot/usr/share/shim/shimx64.efi"
+
+    #       fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz" $verbose |user/x86_64-g8.3.0-lnx5.4.86-uClibc-ng-1.0.35/dev-sysroot" \
+        }
+
+
+#
+# be clear about secure boot configuration
+function fxnPrintSecureBootSettings() {
+
+    echo "#--------------------------------------------------"
+    echo "#  Secure Boot Settings "
+    echo "#"
+    echo "#--------------------------------------------------"
+    echo "#  HW Vendor prefix   [ $HW_VENDOR_PREFIX ]"
+    echo "#  SW Vendor prefix   [ $SW_VENDOR_PREFIX ]"
+    echo "#  ONIE Vendor prefix [ $ONIE_VENDOR_PREFIX ]"
+    echo "#"
+    echo "#  'A safe place'     [ $SAFE_PLACE ]"
+    echo "#  Key storage        [ $(realpath $SECURE_KEY_STORAGE) ]"
+    echo "#  User keys          [ $(realpath $NEW_KEYS_DIR) ]"
+    echo "#  Machine name       [ $ONIE_MACHINE_TARGET ] "
+    echo ""
+    echo " Secure boot build args: [ $ALL_SIGNING_KEYS ]"
+    echo ""
+}
+
+#
+# pack a uefi script to add the keys on the 'usb drive'.
+# This gets run by the user in the UEFI shell and saves a few steps
+#
+function fxnWriteUEFIUpdateKeys()
+{
+    cat <<EOF >  ${UEFI_WRITE_KEYS_SCRIPT}
+# ${UEFI_WRITE_KEYS_SCRIPT} Set key variables
+
+# UEFI Errors decoded:
+# code, mnemonic, description:
+# 0 SHELL_SUCCESS              - The operation completed successfully
+# 1 SHELL_LOAD_ERROR           - The image failed to load.
+# 2 SHELL_INVALID_PARAMETER    - There was an error in the command-line options.
+# 3 SHELL_UNSUPPORTED          - The operation is not supported.
+# 4 SHELL_BAD_BUFFER_SIZE      - The buffer was not the proper size for the request.
+# 5 SHELL_BUFFER_TOO_SMALL     - The buffer is not large enough to hold the requested data.  The required buffer size is returned in the appropriate parameter whenthis error occurs.
+# 6 SHELL_NOT_READY            - There is no data pending upon return.
+# 7 SHELL_DEVICE_ERROR         - The physical device reported an error while attempting the operation.
+# 8 SHELL_WRITE_PROTECTED      - The device cannot be written to.
+# 9 SHELL_OUT_OF_RESOURCES     - A resource has run out.
+#10 SHELL_VOLUME_CORRUPTED     - An inconstancy was detected on the file system causing the operating to fail.
+#11 SHELL_VOLUME_FULL          - There is no more space on the file system.
+#12 SHELL_NO_MEDIA             - The device does not contain any medium to perform the operation.
+#13 SHELL_MEDIA_CHANGED        - The medium in the device has changed since the last access.
+#14 SHELL_NOT_FOUND            - The item was not found.
+#15 SHELL_ACCESS_DENIED        - Access was denied.
+#18 SHELL_TIMEOUT              - The timeout time expired.
+#19 SHELL_NOT_STARTED          - The specified operation could not be started.
+#20 SHELL_ALREADY_STARTED      - The specified operation had already started.
+#21 SHELL_ABORTED              - The operation was aborted by the user
+#25 SHELL_INCOMPATIBLE_VERSION - The function encountered an internal version that was incompatible with a version requested by the caller.
+#26 SHELL_SECURITY_VIOLATION   - The function was not performed due to a security violation.
+#27 SHELL_NOT_EQUAL            - The function was performed and resulted in an unequal comparison
+
+@echo -off
+# Wipe the screen. cls [0-7] will set a color
+cls
+echo "Key install script for UEFI"
+echo " ---------------------------"
+echo " Checking value of KEK. For a first time install it should NOT be set."
+echo " Expect the following message: "
+echo "    dmpstore: No matching variables found... Guid <foo> Name kek"
+# Echo a space for a new line. Double quotes errors as null string
+echo " "
+dmpstore kek
+
+echo " Adding db-all.auth to UEFI db database."
+echo "  This adds hardware and software supplier public DB certificates."
+echo " "
+# The path set up by the kvm build on the 'usb disk'
+.\efi-binaries\UpdateVars.efi db ..\efiVars\db-all.auth
+if %lasterror% ne 0x0 then
+  echo "Error [ %lasterror% ] on db set"
+  goto EXITSCRIPT
+endif
+
+echo " "
+echo " Adding kek-all.auth to the KEK database"
+echo "  This adds hardware and software supplier public KEK certificates."
+
+.\efi-binaries\UpdateVars.efi KEK ..\efiVars\kek-all.auth
+if  %lasterror% ne 0x0  then
+  echo "Error [ %lasterror% ] on KEK set"
+  goto EXITSCRIPT
+endif
+
+# Success message is skipped over if there is an error.
+echo " "
+echo "Success! Updated db and KEK."
+echo " Type: 'dmpstore db' to see the db value."
+echo " Type: 'dmpstore kek' to see the kek value."
+echo " Type: 'edit ReadmeUEFI' for further UEFI key set instructions."
+
+:EXITSCRIPT
+
+EOF
+}
+
+function fxnWriteSbkeysyncTest()
+{
+    cat <<EOF > sb-keysync-test.sh
+
+#!/bin/bash
+
+# From http://jk.ozlabs.org/docs/sbkeysync-maintaing-uefi-key-databases/
+
+#
+# generate keys
+#
+ openssl genrsa -out test-key.rsa 2048
+
+ openssl req -new -x509 -sha256 \
+        -subj '/CN=test-key' -key test-key.rsa -out test-cert.pem
+
+ openssl x509 -in test-cert.pem -inform PEM \
+         -out test-cert.der -outform DER
+
+ # ran uuidgen on host to get this
+ guid="709da64a-97a5-4575-9c75-07a92e93ff30"
+
+ #
+ # Generate key updates
+ #
+
+ sbsiglist --owner $guid --type x509 --output test-cert.der.siglist test-cert.der
+
+ for n in PK KEK db
+ do
+   sbvarsign --key test-key.rsa --cert test-cert.pem \
+            --output test-cert.der.siglist.$n.signed \
+     $n test-cert.der.siglist
+ done
+
+ #
+ # create keystore
+ #
+
+ sudo mkdir -p /etc/secureboot/keys/{PK,KEK,db,dbx}
+ sudo cp *.PK.signed /etc/secureboot/keys/PK/
+ sudo cp *.KEK.signed /etc/secureboot/keys/KEK/
+ sudo cp *.db.signed /etc/secureboot/keys/db/
+
+
+ #
+ # use sbkeysync
+ #
+
+ sbkeysync --verbose --pk --dry-run
+
+ #
+ # sign a bootloader
+ #
+ sbsign --key test-key.rsa --cert test-cert.pem \
+        --output grubx64.efi /boot/efi/efi/ubuntu/grubx64.efi
+ sudo cp /boot/efi/efi/ubuntu/grubx64.efi{,.bak}
+ sudo cp grubx64.efi /boot/efi/efi/ubuntu/
+
+EOF
+
+}
+#sbkeysynctest
+
+#
+# Configuration instructions for running the KVM
+#
+function fxnWriteReadmeUEFI()
+{
+    cat <<EOF >  ${UEFI_INSTRUCTIONS_TXT}
+Steps for handling keys and VM setup
+------------------------------------
+
+What should be signed?
+  PK - Platform Key
+  KEK - Key Exchange Key
+  db  - Signature database - must be signed by PK or KEK
+
+  shimx64.efi <- Microsoft <- KEK and a db
+  grubx64.efi <- ONIE_VENDOR_SECRET_KEY_PEM (makefiles handle this for kvm)
+
+
+Secure boot key steps
+---------------------
+
+1)  First install - 2 grub boot options
+ ONIE: Rescue
+ ONIE: Embed ONIE     <- take this one
+
+NOTE: if you see Install OS as an option, the onie-x86-demo.qcow2 has been used before.
+ A 'make-secure-kvm.sh clean' will reset that.
+
+ KVM reboots.
+
+2 ) New menu:
+
+ ONIE: Install OS  <- take this one
+ ONIE: Rescue
+ ONIE: Uninstall OS
+ ONIE: Update ONIE
+ ONIE: Embed ONIE
+
+# The demo OS has been copied into the 'kvm' directory in the usb drive, so
+# to install:
+
+3 ) type: onie-stop  <- stop discovery process
+4 ) type: blkid      <- list available volumes
+
+ This should look like:
+
+   ${ONIE_MACHINE_TARGET}-OS:/mnt/usb # blkid
+   /dev/vdb: LABEL="ONIE USB-DR" UUID="0195-B0CB"
+   /dev/vda3: LABEL="ONIE-DEMO-OS" UUID="803e6b44-398e-42e4-ae35-5083ff784d36"
+   /dev/vda2: LABEL="ONIE-BOOT" UUID="c73d5c0d-290e-458b-9273-2fb74269ab3a"
+   /dev/vda1: LABEL="EFI System" UUID="86B3-739F"
+
+
+5 ) type: mount /dev/vdb /mnt/usb <- mount the USB drive that has all the keys
+
+6 ) type: onie-nos-install /mnt/usb/kvm/demo-installer-x86_64-${ONIE_MACHINE}.bin <- demo image on USB
+
+...system reboots into DemoOS:
+
+Installing the keys in the UEFI BIOS
+------------------------------------
+
+Now, we need to put keys into UEFI.
+  Those keys are on the USB drive,
+  And key insertion can only happen in UEFI, so we'll boot into that
+
+
+7 ) type: efibootmgr
+ This should look like:
+
+   ${ONIE_MACHINE_TARGET}-OS:/mnt/usb # efibootmgr
+   BootCurrent: 000B
+   Timeout: 0 seconds
+   BootOrder: 000B,000A,0000,0001,0002,0003,0004,0005,0006,0007,0008,0009
+   Boot0000* UiApp
+   Boot0001* UEFI QEMU DVD-ROM QM00003
+   Boot0002* UEFI Floppy
+   Boot0003* UEFI Floppy 2
+   Boot0004* UEFI Misc Device
+   Boot0005* UEFI Non-Block Boot Device
+   Boot0006* UEFI PXEv4 (MAC:525400133479)
+   Boot0007* UEFI PXEv4 (MAC:525400133479) 2
+   Boot0008* UEFI HTTPv4 (MAC:525400133479)
+   Boot0009* EFI Internal Shell
+   Boot000A* ONIE: Open Network Install Environment
+   Boot000B* ONIE-DEMO-OS
+
+Note the number of 'EFI Internal Shell' - 0009 in this example
+
+8 ) type:  efibootmgr --bootnext 0009  <- for EFI Internal Shell
+
+9 ) type: efibootmgr
+     You should now see a BooNext: 000X at the top
+
+10 ) type:  reboot
+
+UEFI TIPS
+-----------
+If you are not familar with the UEFI CLI, here are a few useful commands
+  cls          - clear screen
+  cls <0-7>    - change background color to #
+  ctrl-h       - backspace
+  ls           - list current directory contents
+  dmpstore     - print variables
+  edit         - minimal file editor
+  help -b      - help options
+  mode 100 31  - get more console columns/rows
+  reset        - reboot
+  ..\          - directory up - DOS style
+
+Once UEFI boots
+----------------
+
+11 ) Press esc key to stop countdown and  drop into Shell>
+
+Go to the USB drive. I don't see a clear way to ID this by anything
+ other than what' it's not. It has an F3 in it, - Alias(s):F3 - and it
+ isn't a cd or floppy
+
+
+12 ) type: fs2:  <- will be fs1 if you didn't embed ONIE,
+                    OR if you are running from DemoOS
+13 ) type: ls    <- should see keys and .pem files
+
+# Add db and KEK keys
+Either:
+ 14 ) type: write-keys.nsh to run a script to update db and KEK
+OR
+ 14a ) type: cd efi-binaries
+ 14b ) type: .\efi-binaries\UpdateVars.efi db ..\db-all.auth
+ 14c ) type: .\efi-binaries\UpdateVars.efi KEK ..\kek-all.auth
+
+NOTE: 'dmpstore db' will not print a value. This is expected
+
+16 ) type: exit
+
+# Add PK
+< you should be in the UEFI CURSES-style menu now >
+To navigate down to set the PK, it's not immediately obvious.
+Use arrow keys and <enter> to set values.
+
+Device Manager
+Secure Boot Configuration
+  Secure Boot Mode <custom mode>
+  Custom Secure Boot Options
+    PK Options
+     Enroll PK
+      Enroll PK Using File
+       Select ONIE USB-DR, [PciRoot(0x0)/Pci(0x5,0x0)]
+         <keys>
+          <hw-vendor>
+            ALEX docs say hw-vendor-PK-public-key.pem (wants der)
+            try hw-vendor-PK-cert.der
+         Esc to exit
+        (should say Commit Changes and exit
+      F10 At 'Current Secure Boot State  Enabled' to activate secure boot
+     Esc At 'Secure Boot Configuration'
+   Continue - at top menu
+  Enter - Should get 'Configuration changed. Reboot to apply' message
+
+Secure Boot should now be enabled.
+When you log back in to ONIE
+Use:
+  efivar --list  to get the Secure Boot variable
+Print the value with:
+efivar --print --name=8be4df61-93ca-11d2-aa0d-00e098032b8c-SecureBoot
+
+Name: "SecureBoot"
+Attributes:
+        Boot Service Access
+        Runtime Service Access
+Value:
+00000000  01   <- If 01, is set. If 00, Secure Boot is not active.
+
+EOF
+
+    # Keep a copy of this with the images so it can be read ouside of
+    # running ONIE.
+    cp "$UEFI_INSTRUCTIONS_TXT" "$KVM_DIR"
+}
+
+# Copy the shim to a safe place
+function fxnCopyShimSafe()
+{
+    #
+    # If the unsigned version exists, we've set the signed version
+    # to be the default, and can skip all the rest of this
+    #
+    if [ ! -e ${SAFE_PLACE}/shimx64.efi.unsigned ];then
+        fxnPS "Secure: Copying signed shim to a 'safe place' $SAFE_PLACE"
+        mkdir -p $SAFE_PLACE || exit 1
+        cp ${BUILD_DIR}/${ONIE_MACHINE}/shim/install/* $SAFE_PLACE || exit 1
+
+        fxnPS "Secure: Renaming existing shim64.efi in ${SAFE_PLACE} to shim64.efi.unsigned"
+        mv ${SAFE_PLACE}/shimx64.efi  ${SAFE_PLACE}/shimx64.efi.unsigned || exit 1
+
+        fxnPS "Secure: Renaming shim64.efi.signed to shim64.efi"
+        mv ${SAFE_PLACE}/shimx64.efi.signed  ${SAFE_PLACE}/shimx64.efi || exit 1
+        # Now the signed shim is the default
+    fi
+
+    if [ -e ${SAFE_PLACE}/shimx64.efi ];then
+        fxnPS "Secure: using signed shim at ${SAFE_PLACE}/shimx64.efi."
+    fi
+    # See build-config/make/shim.make for build code
+
+}
+
+#
+# Put files into the USB transfer directory to be copied on to the
+# USB filesystem.
+function fxnPopulateUSBTransfer()
+{
+    #
+    # Since the "USB Drive" of addtional files can get created outside
+    # the container, use this directory to hold all the files from
+    # inside the container we'd like to see on that drive.
+    # The kvm-tool.sh script will have created the USB_XFER_DIR
+    #
+    if [ ! -e "$USB_XFER_KEY_DIR" ];then
+        echo "Secure: creating directories to hold 'usb drive' contents at: $USB_XFER_DIR"
+        mkdir -p \
+              "$USB_XFER_KEY_DIR"          \
+              "$USB_XFER_HW_KEY_DIR"       \
+              "$USB_XFER_SW_KEY_DIR"       \
+              "$USB_XFER_ONIE_KEY_DIR"     \
+              "$KEY_EFI_BINARIES_DIR" \
+              "$KEY_UTILITIES_DIR"   || exit 1
+    else
+        echo " $USB_XFER_DIR exists"
+    fi
+
+    fxnPS "Secure: USB-DRIVE: Adding keys from $SECURE_KEY_STORAGE to $USB_XFER_DIR"
+
+    ls -l "$USB_XFER_DIR"
+
+    #
+    # copy everything, then move so files like kek-all.auth stay at the top level.
+    #
+
+    if [  -d "$NEW_KEYS_DIR" ];then
+        # User generated keys, rather than using ONIE defaults.
+        rsync -a --no-specials --no-devices ${NEW_KEYS_DIR} "${USB_XFER_DIR}/" || exit 1
+        rsync -a --no-specials --no-devices ${NEW_KEYS_DIR}/HW/efi-keys/ "${USB_XFER_HW_KEY_DIR}/" || exit 1
+        rsync -a --no-specials --no-devices ${NEW_KEYS_DIR}/SW/efi-keys/ "${USB_XFER_SW_KEY_DIR}/" || exit 1
+        rsync -a --no-specials --no-devices ${NEW_KEYS_DIR}/ONIE/efi-keys/ "${USB_XFER_ONIE_KEY_DIR}/" || exit 1
+    else
+        cp -r ${SECURE_KEY_STORAGE}/* "${USB_XFER_DIR}/" || exit 1
+        mv ${USB_XFER_DIR}/${HW_VENDOR_PREFIX}* "${USB_XFER_HW_KEY_DIR}/" || exit 1
+        mv ${USB_XFER_DIR}/${SW_VENDOR_PREFIX}* "${USB_XFER_SW_KEY_DIR}/" || exit 1
+        mv ${USB_XFER_DIR}/${ONIE_VENDOR_PREFIX}* "${USB_XFER_ONIE_KEY_DIR}/" || exit 1
+    fi
+
+    fxnPS "Secure: USB-DRIVE: copying local /usr/bin/sb tools to $USB_XFER_DIR so USB can pick them up."
+    cp /usr/bin/sb* ${KEY_UTILITIES_DIR}/ || exit 1
+
+    # Copy the efi files out of the contaner as the next stage
+    # has to be run in an environment where loopback mount works
+    fxnPS "Secure: USB-DRIVE: Copying efi utilities from the container's /usr/bin to $USB_EFI_BINARIES_DIR"
+
+    # efi tools were placed by a 'make install' at container creation time
+    cp /usr/share/efitools/efi/*.efi "${KEY_EFI_BINARIES_DIR}/" || exit 1
+    cp /usr/bin/*efi*                "${KEY_EFI_BINARIES_DIR}/" || exit 1
+    cp /usr/bin/sig-list-to-certs    "${KEY_UTILITIES_DIR}/" || exit 1
+    cp /usr/bin/flash-var            "${KEY_UTILITIES_DIR}/" || exit 1
+    fxnPS "Secure: USB-DRIVE efi binaries:"
+    ls -l ${KEY_EFI_BINARIES_DIR}
+    fxnPS "Secure: USB-DRIVE efi utilities:"
+    ls -l ${USB_XFER_EFI_UTILITIES_DIR}
+
+    echo "Secure: USB-DRIVE: Copying x509 certificates/keys to $USB_XFER_DIR"
+    #sudo cp -r ../machine/${ONIE_MACHINE_TARGET}/x509/* ${USB_XFER_DIR}/ || exit 1
+
+    fxnPS "Secure: USB-DRIVE: Copying unmodified $UEFI_BIOS_SOURCE: to ${KVM_DIR}"
+    if [ ! -e "$KVM_DIR" ];then
+        mkdir -p "$KVM_DIR"
+    fi
+    cp ${UEFI_BIOS_SOURCE} ${KVM_DIR}/ || exit 1
+
+    # copy over key instructions
+    if [ ! -e ./${UEFI_INSTRUCTIONS_TXT} ];then
+        echo "Secure: generating post-install key manipulation instructions as ${UEFI_INSTRUCTIONS_TXT}"
+        fxnWriteReadmeUEFI
+    fi
+    echo "Copying ${UEFI_INSTRUCTIONS_TXT} into ${USB_XFER_DIR}/"
+    sudo cp ./${UEFI_INSTRUCTIONS_TXT} ${USB_XFER_DIR}/
+
+    if [ ! -e ${UEFI_WRITE_KEYS_SCRIPT} ];then
+        echo "Secure: generating UEFI script to add db and KEK keys as ${UEFI_WRITE_KEYS_SCRIPT}"
+        fxnWriteUEFIUpdateKeys
+    fi
+
+    if [ ! -e sb-keysync-test.sh ];then
+        fxnWriteSbkeysyncTest
+    fi
+
+    #    echo "Copying ${UEFI_WRITE_KEYS_SCRIPT} into ${USB_XFER_DIR}/"
+    #    sudo cp ./${UEFI_WRITE_KEYS_SCRIPT} ${USB_XFER_DIR}/
+
+
+    # Copy over script to do key setup on runnng system
+    # Note: wish I knew what happened to this script...
+    if [ -e ./kvm-internal-setup.sh ];then
+        echo "Copying ./kvm-internal-setup.sh into $USB_XFER_DIR"
+        cp ./kvm-internal-setup.sh $USB_XFER_DIR || exit 1
+    fi
+}
+
+#
+# Takes: makefile target. Otherwise builds all
+function fxnBuildSecure()
+{
+    local theTarget="$1"
+	set -x
+    if [ ! -e "$NEW_KEYS_DIR" ];then
+        echo ""
+        echo "ERROR! A secure build requires keys under [ $NEW_KEYS_DIR ]. "
+        echo "   Run: $0 generate-all-keys to create some."
+        echo ""
+        exit 1
+    fi
+
+    if [ "$theTarget" != "" ];then
+		cd ../build-config
+        echo ""
+        echo "#####################################################"
+        echo "#"
+        echo "# make V=1 -j8 $DOWNLOAD_CACHE $ALL_SIGNING_KEYS ${MACHINEROOT_DIR}  ${MACHINE_BUILD_TARGET} $theTarget"
+        echo "#"
+        echo "#####################################################"
+        fxnEC make V=1 -j8 $DOWNLOAD_CACHE $ALL_SIGNING_KEYS ${MACHINEROOT_DIR}  ${MACHINE_BUILD_TARGET} "$theTarget" || exit 1
+        exit 0
+    fi
+	echo "BAILING"
+exit 1
+    fxnGenerateKEKAndDBEFIVars	
+    #
+    # build the shim
+    #
+
+    fxnRebuildSHIM
+
+    #
+    # build ONIE
+    #
+	cd ../build-config
+    fxnPS "Secure: Building signed ONIE: make $DOWNLOAD_CACHE -j8 $ALL_SIGNING_KEYS ${MACHINEROOT_DIR}  ${MACHINE_BUILD_TARGET} all demo recovery-iso SHIM_PREBUILT_DIR=${SAFE_PLACE}"
+
+    echo "    time make $DOWNLOAD_CACHE  $ALL_SIGNING_KEYS ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} V=1 \
+         -j8 all demo recovery-iso SHIM_PREBUILT_DIR=${SAFE_PLACE}"
+
+	pwd
+    # clear out old images - new one is being assembled
+    make $DOWNLOAD_CACHE  $ALL_SIGNING_KEYS ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} V=1  image-clean
+
+    time make $DOWNLOAD_CACHE  $ALL_SIGNING_KEYS ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} V=1 \
+         -j8 all demo recovery-iso SHIM_PREBUILT_DIR=${SAFE_PLACE}  || exit 1
+
+    # Pack up everything from the container and build environment that
+    # we want to have on the USB drive for image use.
+
+    # Install of external sbverify not guaranteed
+    # Run a sanity check on this being signed.
+
+    #
+    # So, what's signed at this point?
+    #
+    fxnVerifySigned
+
+    echo "----------------- Putting keys and utilities on USB drive  -------------------------"
+
+    fxnPopulateUSBTransfer
+
+}
+
+#
+# If pesign is used, (as is the case with Debian package signing)
+# additional key formats are requred.
+#
+
+function fxnPesignKeys()
+{
+    local workingDir="$1" # create keys here
+    local keyPath="$2"    # path to source keys
+    local prefix="$3"     # something like 'ONIE-shim-key'
+
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating PKCS12 versions of efi keys            #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    # Set up the keys and database in this directory
+    fxnEC cd "$workingDir"  || exit 1
+
+    # Create a .p12 format key
+    # This will ask for a password
+
+    echo "#"
+    echo "# Creating .p12 key"
+    echo "#"
+    fxnEC openssl pkcs12 -export \
+          -in "${keyPath}/${prefix}-cert.pem" \
+          -inkey "${keyPath}/${prefix}-secret-key.pem" \
+          -name $prefix \
+          -out "${prefix}.p12" || exit 1
+
+    # Re apply the previously asked for passwords
+    # To create a .key with a friendlyName
+    echo "#"
+    echo "# Creating .key file."
+    echo "#"
+
+    fxnEC openssl pkcs12 -in "${prefix}.p12" -nodes -out "${prefix}-private-key.key" || exit 1
+
+    # Create a NSS cert database (key4.db, dert9.db files, etc)
+    echo "#"
+    echo "# Creating certificate database."
+    echo "#"
+
+    fxnEC pk12util -i  "${prefix}.p12" -d sql:"$PWD" || exit 1
+
+}
+
+#
+# Go through creating all the keys needed.
+#
+
+# Takes:
+# User - the entity owning the keys (HW vendor, SW vendor, ONIE vendor...)
+# Certificate Name: name of the entity owning the key (HW, SW, ONIE )
+# User email:
+# Certificate description
+# Date - optional include of a no space characters date.
+#        This can be useful to identify certificates when
+#        testing with mulitple keys
+function fxnGenerateKeys()
+{
+    local user="$1"
+    local certName="$2"
+    local userEmail="$3"
+    local certDescription="$4"
+    local useDate="$5"
+    local keyDir="${NEW_KEYS_DIR}/${certName}"
+
+    if [ "$3" = "" ];then
+        echo "ERROR! Failed to get correct key generation arguments."
+        echo "Expected name for key, user email, key description. Exiting."
+        exit 1
+    fi
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating keys with:                             #"
+    echo "#  User:           [ $user ]"
+    echo "#  Name:           [ $certName ]"
+    echo "#  User email:     [ $userEmail ]"
+    echo "#  Description:    [ $certDescription ]"
+    echo "#  Optional Date:  [ $useDate ]"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    NEW_EFI_KEYS_DIR="${keyDir}/efi-keys"
+    NEW_GPG_KEYS_DIR="${keyDir}/gpg-keys"
+    NEW_PKCS12_KEYS_DIR="${keyDir}/pkcs12-keys"
+
+    if [ -d "${keyDir}/${certName}/" ];then
+        echo "Wiping out previous keys"
+        rm -rf "$keyDir"
+    fi
+
+    if [ ! -d "${NEW_EFI_KEYS_DIR}" ];then
+        mkdir -p "${NEW_EFI_KEYS_DIR}"
+        mkdir -p "${NEW_GPG_KEYS_DIR}"
+        mkdir -p "${NEW_PKCS12_KEYS_DIR}"
+    fi
+
+    cd "${NEW_EFI_KEYS_DIR}"
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating EFI signing keys with openssl.         #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    # make sure mk-key-and-cert exists in non-kvm machine dir
+    #   MK_KEY_AND_CERT_SCRIPT="${ONIE_TOP_DIR}/machine/${ONIE_MACHINE_TARGET}/x509/mk-key-and-cert"
+    # Only pass useDate if it is set
+    MK_KEY_AND_CERT_SCRIPT="${CRYPTO_DIR}/mk-key-and-cert"
+    if [ 1 ];then
+        case $user in
+            "$HW_VENDOR_PREFIX" )
+                $MK_KEY_AND_CERT_SCRIPT "platform-key"     "$certName" "$certDescription platform key"      $useDate
+                $MK_KEY_AND_CERT_SCRIPT "key-exchange-key" "$certName" "$certDescription key exchange key"  $useDate
+                $MK_KEY_AND_CERT_SCRIPT "database-key"     "$certName" "$certDescription database key"      $useDate
+                ;;
+            "$SW_VENDOR_PREFIX" )
+                # No platform keys for a software vendor
+                $MK_KEY_AND_CERT_SCRIPT "key-exchange-key" "$certName" "$certDescription key exchange key"  $useDate
+                $MK_KEY_AND_CERT_SCRIPT "database-key"     "$certName" "$certDescription database key"      $useDate
+                ;;
+
+            "$ONIE_VENDOR_PREFIX")
+                # ONIE vendor gets to sign the SHIM with this
+                $MK_KEY_AND_CERT_SCRIPT "shim-key" "$certName" "$certDescription shim signing key"          $useDate
+                # test out key connversion
+                fxnPesignKeys "$NEW_PKCS12_KEYS_DIR"  "$NEW_EFI_KEYS_DIR" "${certName}-shim-key"            $useDate
+                ;;
+
+            * )
+                echo "Unrecognized vendor type [ $user ]. Generating all possible keys."
+                $MK_KEY_AND_CERT_SCRIPT "platform-key"     "$certName" "$certDescription platform key"      $useDate
+                $MK_KEY_AND_CERT_SCRIPT "key-exchange-key" "$certName" "$certDescription key exchange key"  $useDate
+                $MK_KEY_AND_CERT_SCRIPT "database-key"     "$certName" "$certDescription database key"      $useDate
+                $MK_KEY_AND_CERT_SCRIPT "shim-key"         "$certName" "$certDescription shim signing key"  $useDate
+                ;;
+
+        esac
+
+        # Generate formats used in deb signing
+        #openssl pkcs12 -export -in ONIE-shim-key-cert.pem  -inkey ONIE-shim-key-secret-key.pem -name 'ONIE-shim-key' -out ONIE-shim-key.p12
+        #openssl pkcs12 -in ONIE-shim-key.p12  -nodes -out ONIE-shim-key-private-key.key
+
+    else
+        openssl req -new -x509 -newkey rsa:2048 -keyout "${certName}"-key.priv -outform DER -out "${certName}"-certificate.der -days 36500 -subj "/CN=${certDescription}/" -nodes
+
+        openssl x509 -inform der -in "${certName}"-certificate.der -out "${certName}"-certificate.pem
+
+        openssl rsa -in "${certName}"-key.priv -text > "${certName}"-private_key.pem
+    fi
+
+    # TODO openssl x509 -outform der -in ONIE-shim-key-cert.pem -out ONIE-shim-key-cert.crt   <- cert for debian shim package signing.
+
+    cd "${NEW_GPG_KEYS_DIR}"
+    echo ""
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating GPG2 keys.                             #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    echo "Generating GPG keys."
+    # echo "use-agent" >> ~/.gnupg/gpg.conf
+    # echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+    # echo "allow-loopback-pinentry >> ~/.gnupg/gpg-agent.conf
+
+    # This export puts the pinentry dialog box in the terminal,
+    # Rather than having it pop up on a host system.
+    export GPG_TTY=$(tty)
+    gpg2 --verbose --homedir "$NEW_GPG_KEYS_DIR" --no-default-keyring --batch --gen-key <<EOF
+%echo Generating a basic OpenPGP key
+Key-Type: RSA
+Key-Length: 4096
+Name-Real: ${certName}
+Name-Comment: ${certDescription}
+Name-Email: ${userEmail}
+Expire-Date: 0
+%pubring ${certName}-pubring.kbx
+%echo done
+EOF
+    if [ $? != "0" ];then
+        echo "ERROR! Failed to generate gpg key."
+        exit 1
+    fi
+    #%pubring ${certName}-public.key
+    #%secring ${certName}-private.key
+    #Passphrase: ph
+
+
+    #
+    # Since gpg operations aren't happening in the user's home directory,
+    # This prefix goes on all gpg commands
+    #
+    GPG_KEYRING_ACCESS="gpg2 --verbose --homedir $NEW_GPG_KEYS_DIR --no-default-keyring --keyring ${NEW_GPG_KEYS_DIR}/${certName}-pubring.kbx "
+    #
+    # Export those keys
+    echo "Exporting public key to: ${certName}-public.asc"
+    $GPG_KEYRING_ACCESS --armor --output ${certName}-public.asc --export $certName
+    echo "Exporting secret key to: ${certName}-secret.asc"
+    $GPG_KEYRING_ACCESS --armor --output ${certName}-secret.asc --export-secret-key $certName
+
+
+
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Converting openssl keys to pgp with monkeysphere. #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    #
+    # Set the PEM2OPENPGP_ environment variables for the run
+    PEM2OPENPGP_EXPIRATION=$((86400 * 7305)) \
+                          PEM2OPENPGP_USAGE_FLAGS=sign \
+                          pem2openpgp ${userEmail} < "${NEW_EFI_KEYS_DIR}/${certName}"-private_key.pem | $GPG_KEYRING_ACCESS --import
+
+
+    echo "GPG: List public keys"
+    echo "  $GPG_KEYRING_ACCESS --list-keys"
+    $GPG_KEYRING_ACCESS --list-keys
+    echo ""
+    echo "GPG: List secret keys"
+    $GPG_KEYRING_ACCESS --list-secret-keys
+    echo ""
+
+    #   kbxutil --stats ${NEW_GPG_KEYS_DIR}/${certName}-pubring.kbx
+
+
+    echo " Done."
+    echo " Files are in [ $keyDir ]"
+    cd "$keyDir"
+    echo ""
+
+    echo ""
+    tree "$keyDir"
+
+
+}
+
+#
+# Generate KeyExchangeKey and DataBase values
+# to be set as UEFI variables
+#
+function fxnGenerateKEKAndDBEFIVars()
+{
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating KEK and DB varaibles for UEFI install  #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+
+    # Reference a passed in file, or generate a new one, that
+    # details where every key to add should come from.
+    fxnReadKeyConfigFile
+
+    # Prepared signed KEK and DB signature lists for updating a fresh
+    # system.  Include the hardware vendor's and software vendors's keys
+    # in these lists.  Trying to simulate the scenario where both the
+    # hardware vendor and a software vendor have their keys enrolled in
+    # the KEK and DB.
+
+    local extraDBESL=""
+
+    if [  -d "$EFI_VARS_DIR" ];then
+        echo "Cleaning out old [ $EFI_VARS_DIR ]"
+        rm -rf "$EFI_VARS_DIR"
+    fi
+
+    mkdir -p "$EFI_VARS_DIR"
+
+
+    if [ 1 = 1 ];then
+
+        echo ""
+        echo "UEFI KEK / DB keys"
+        echo "-----------------"
+        echo ""
+        echo "Key Exchange Key"
+        echo "----"
+        echo "  KEK software cert:     ${KP_KEK_SOFTWARE_CERT}"
+        echo "  KEK hardware cert:     ${KP_KEK_HARDWARE_CERT}"
+        echo ""
+        echo "Database"
+        echo "----"
+        echo "  Software cert:        $KP_DB_SOFTWARE_CERT"
+        echo "  Hardware cert:        $KP_DB_HARDWARE_CERT"
+        echo "  Extra cert:           $KP_DB_EXTRA_CERT"
+        echo ""
+        echo "Hardware Platform"
+        echo "------"
+        echo "  HW Platform cert:     $KP_PLATFORM_CERT"
+        echo "  HW Platform private:  $KP_PLATFORM_SECRET_KEY"
+        echo ""
+        echo " cert = public key"
+    fi
+
+    # Create a random guid for the keys so they stand out if
+    # the BIOS lists them
+    uuidgen --random > /tmp/GUID.txt
+    # the KEK variable update, signed by hw-vendor PK
+    # ./sw-vendor-KEK-cert.pem
+
+    # Clean out keys if this is run multiple times
+    rm /tmp/db*.esl 2> /dev/null
+    rm /tmp/kek.esl 2> /dev/null
+
+	# Software vendor KEK
+    fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "${KP_KEK_SOFTWARE_CERT}"  /tmp/kek-sw.esl || exit 1
+    # ./hw-vendor-KEK-cert.pem
+	# Hardware vendor KEK
+    fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "${KP_KEK_HARDWARE_CERT}"  /tmp/kek-hw.esl || exit 1
+
+    fxnEC cat /tmp/kek-hw.esl /tmp/kek-sw.esl > /tmp/kek-all.esl || exit 1
+
+    #-c ./hw-vendor-PK-cert.pem \
+        #-k ./hw-vendor-PK-secret-key.pem \
+
+    fxnEC sign-efi-sig-list -g $(cat /tmp/GUID.txt) \
+          -c "$KP_PLATFORM_CERT" \
+          -k "$KP_PLATFORM_SECRET_KEY"  \
+          kek /tmp/kek-all.esl "${EFI_VARS_DIR}/kek-all.auth" || exit 1
+
+
+    # the DB variable update, signed by hw-vendor PK
+    #/sw-vendor-DB-cert.pem
+    fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "$KP_DB_SOFTWARE_CERT"  /tmp/db-sw.esl || exit 1
+    # ./hw-vendor-DB-cert.pem /tmp/db-hw.esl
+    fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "$KP_DB_HARDWARE_CERT"  /tmp/db-hw.esl || exit 1
+
+    #   cat /tmp/db-hw.esl /tmp/db-sw.esl > /tmp/db-all.esl
+
+    # Add cumulus public dev key to the database
+    #cl-key="/home/adoyle/ONIE/vxDev/cleanRebuild/onie-cn/onie/safe-place/new-keys/cumulus-dev/efi-keys/dev-code-signing.der"
+
+    if [ "$KP_DB_EXTRA_CERT" != "" ];then
+
+        extraDBESL="/tmp/db-cl.esl"
+        fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "$KP_DB_EXTRA_CERT" "$extraDBESL"   || exit 1
+
+        echo ""
+        echo " Adding  $KP_DB_EXTRA_CERT to db"
+        echo ""
+
+    fi
+    # Make sure keys don't repeat here. Otherwise add fails in UEFI
+    cat $extraDBESL  /tmp/db-sw.esl /tmp/db-hw.esl > /tmp/db-all.esl
+
+    fxnEC sign-efi-sig-list -g $(cat /tmp/GUID.txt) \
+          -c "$KP_PLATFORM_CERT" \
+          -k "$KP_PLATFORM_SECRET_KEY"  \
+          db /tmp/db-all.esl "${EFI_VARS_DIR}/db-all.auth" || exit 1
+
+    echo ""
+    echo " Generated:"
+    echo "${EFI_VARS_DIR}/kek-all.auth"
+    echo "${EFI_VARS_DIR}/db-all.auth"
+    ls -l "${EFI_VARS_DIR}"
+    echo ""
+
+}
+
+# Convert a key to be able to be added to the UEFI db
+function fxnAddUEFIDBKey()
+{
+	# This is a public key with a certificate in it.
+	# Could be .der or .pem
+	local certPassed="$1"
+	local outputName="new-uefi-db-key"
+	echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Generating UEFI db key from [ $certPassed ]"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+	if [ ! -e "$certPassed" ];then
+		echo "ERROR! Failed to find public key with certificate $certPassed. Exiting."
+		exit 1
+	fi
+
+    # Reference a passed in file, or generate a new one, that
+    # details where every key to add should come from.
+	# we need this for the key exchange key that has to sign the
+	# passed in key.
+    fxnReadKeyConfigFile
+
+	# convert the certificate key to esl format
+	echo "Converting key format to .esl"
+	fxnEC cert-to-efi-sig-list $1 ./${outputName}.esl || exit 1
+
+	echo "Signing ${outputName}.esl with $KP_PLATFORM_SECRET_KEY and $KP_PLATFORM_CERT" 
+	fxnEC sign-efi-sig-list -k "$KP_PLATFORM_SECRET_KEY"  \
+					  -c "$KP_PLATFORM_CERT" \
+					  db \
+					  ${outputName}.esl \
+					  ${outputName}.auth || exit 1
+
+	echo "Converted key is at $(realpath ./${outputName}.auth )"
+}
+
+# Create full sets of keys for:
+#  a hardware vendor
+#  a software vendor
+#  and an ONIE vendor.
+# Takes:
+#  Optional date string. This is handy for testing key permutations
+function fxnGenerateAllKeys()
+{
+    # Embedding a creation date in the certificate is optional.
+    # ...but is useful when testing to distinguish between
+    # different keys.
+    local useDate="$1"
+    if [ -e "$NEW_KEYS_DIR" ];then
+        echo "Keys directory already exists at [ $NEW_KEYS_DIR ]"
+        echo "Delete this if you want to generate new keys."
+        exit 1
+    else
+        fxnGenerateKeys "$HW_VENDOR_PREFIX"   "HW"   "hardware@onie.org" "Hardware vendor certificate." $useDate
+        fxnGenerateKeys "$SW_VENDOR_PREFIX"   "SW"   "software@onie.org" "Software vendor certificate." $useDate
+        fxnGenerateKeys "$ONIE_VENDOR_PREFIX" "ONIE" "onie@onie.org" "ONIE vendor certificate."         $useDate
+
+        # Set up EFI variables to have the hardware platform key authenticate the sofware key,
+        # now that both exist
+        fxnGenerateKEKAndDBEFIVars
+
+        tree "$NEW_KEYS_DIR"
+    fi
+}
+
+#
+# key arguments passed to ONIE on the make command line
+#
+#ONIE_VENDOR_SECRET_KEY_PEM=""
+#ONIE_VENDOR_CERT_DER=""
+#ONIE_VENDOR_CERT_PEM=""
+#SHIM_SELF_SIGN_SECRET_KEY_PEM=""
+#SHIM_SELF_SIGN_PUBLIC_CERT_PEM=""
+#MODULE_SIG_KEY=""
+
+# Gets set after config file is read.
+ALL_SIGNING_KEYS=""
+#
+# potential key values
+KP_SHIM_EMBED_DER=""
+KP_SHIM_SECRET_KEY=""
+KP_SHIM_PUBLIC_CERT=""
+KP_GRUB_SECRET_KEY=""
+KP_GRUB_PUBLIC_CERT=""
+KP_KERNEL_SECRET_KEY=""
+KP_KERNEL_PUBLIC_CERT=""
+KP_IMAGE_SECRET_KEY=""
+KP_IMAGE_PUBLIC_CERT=""
+
+# Location of signed shim
+KP_SHIM_PREBUILT_DIR=""
+
+# keys added to UEFI database:
+KP_KEK_SOFTWARE_CERT=""
+KP_KEK_HARDWARE_CERT=""
+KP_DB_SOFTWARE_CERT=""
+KP_DB_HARDWARE_CERT=""
+# add another key to the db, if desired
+KP_DB_EXTRA_CERT=""
+KP_PLATFORM_CERT=""
+KP_PLATFORM_SECRET_KEY=""
+
+# CSV list of variables and paths to assign to them
+# Ex: KP_SHIM_EMBED_DER,/home/onieUser/onie/safe-place/new-keys/ONIE/efi-keys/ONIE-shim-key-cert.der,
+fxnReadKeyConfigFile()
+{
+    local foundMatch="FALSE"
+
+
+    # If no key file name was supplied
+    if [ "$KEY_CONFIG_FILE" = "" ];then
+        # Generate a default to read
+        fxnGenerateCSVKeyFile
+        KEY_CONFIG_FILE="$DEFAULT_KEY_CONFIG_FILE"
+    fi
+    if [ ! -e "$KEY_CONFIG_FILE" ];then
+        echo "ERROR! Failed to find key configuration file at [ $KEY_CONFIG_FILE ]"
+        exit 1
+    fi
+	echo""
+	echo "#####################################################"
+	echo "#"
+	echo "# Reading key paths from [ ${PWD}/$KEY_CONFIG_FILE ]"
+	echo "#"	
+    echo "#####################################################"	
+	echo ""
+    while IFS=, read -r name alignspace path emptySpace; do
+        #echo "$name  $path"
+        foundMatch="TRUE"
+        case $name in
+            KP_ONIE_VENDOR_SECRET_KEY_PEM )
+                KP_ONIE_VENDOR_SECRET_KEY_PEM="$path"
+                ;;
+
+            KP_ONIE_VENDOR_CERT_DER )
+                KP_ONIE_VENDOR_CERT_DER="$path"
+                ;;
+
+            KP_ONIE_VENDOR_CERT_PEM )
+                KP_ONIE_VENDOR_CERT_PEM="$path"
+                ;;
+
+            KP_SHIM_SELF_SIGN_SECRET_KEY_PEM )
+                KP_SHIM_SELF_SIGN_SECRET_KEY_PEM="$path"
+                ;;
+
+            KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM )
+                KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM="$path"
+                ;;
+
+            KP_MODULE_SIG_KEY_SRCPREFIX )
+                KP_MODULE_SIG_KEY_SRCPREFIX="$path"
+                ;;
+			
+#			KP_KERNEL_SIGNING_KEY_DIR )
+#				KP_KERNEL_SIGNING_KEY_DIR="$path"
+#				;;
+
+            KP_SHIM_EMBED_DER )
+                KP_SHIM_EMBED_DER="$path"
+                ;;
+
+			KP_SHIM_PREBUILT_DIR )
+				KP_SHIM_PREBUILT_DIR="$path"
+				;;
+			
+            KP_SHIM_SECRET_KEY )
+                KP_SHIM_SECRET_KEY="$path"
+                ;;
+
+            KP_SHIM_PUBLIC_CERT )
+                KP_SHIM_PUBLIC_CERT="$path"
+                ;;
+			
+            KP_GRUB_SECRET_KEY )
+                KP_GRUB_SECRET_KEY="$path"
+                ;;
+
+            KP_GRUB_PUBLIC_CERT )
+                KP_GRUB_PUBLIC_CERT="$path"
+                ;;
+
+            KP_KERNEL_SECRET_KEY )
+                KP_KERNEL_SECRET_KEY="$path"
+                ;;
+
+            KP_KERNEL_PUBLIC_CERT )
+                KP_KERNEL_PUBLIC_CERT="$path"
+                ;;
+
+            KP_IMAGE_SECRET_KEY )
+                KP_IMAGE_SECRET_KEY="$path"
+                ;;
+
+            KP_IMAGE_PUBLIC_CERT )
+                KP_IMAGE_PUBLIC_CERT="$path"
+                ;;
+
+            #
+            # UEFI variables
+            #
+            KP_KEK_SOFTWARE_CERT )
+                KP_KEK_SOFTWARE_CERT="$path"
+                ;;
+
+            KP_KEK_HARDWARE_CERT )
+                KP_KEK_HARDWARE_CERT="$path"
+                ;;
+
+            KP_DB_SOFTWARE_CERT )
+                KP_DB_SOFTWARE_CERT="$path"
+                ;;
+
+            KP_DB_HARDWARE_CERT )
+                KP_DB_HARDWARE_CERT="$path"
+                ;;
+
+            KP_DB_EXTRA_CERT )
+                #if adding an extra key to the db
+                KP_DB_EXTRA_CERT="$path"
+                ;;
+
+            KP_PLATFORM_CERT )
+                KP_PLATFORM_CERT="$path"
+                ;;
+
+            KP_PLATFORM_SECRET_KEY )
+                KP_PLATFORM_SECRET_KEY="$path"
+                ;;
+
+			#
+			# GPG keys for Extended Secure Boot
+			KP_GPG_SIGN_PUBRING )
+				KP_GPG_SIGN_PUBRING="$path"
+				;;
+
+			KP_GPG_SIGN_SECRING )
+				KP_GPG_SIGN_SECRING="$path"
+				;;
+
+			# Location of third party (or self) signed shim efi
+			KP_SHIM_PREBUILT_DIR )
+				KP_SHIM_PREBUILT_DIR="$path"
+				;;
+			
+            * )
+                foundMatch="FALSE"
+                ;;
+
+        esac
+
+        if [ "$foundMatch" = "TRUE" ];then
+            # matched an expected term, so didn't parse a comment.
+            # is the path valid?
+            if [ ! -e "$path" ];then
+                echo "ERROR! in [ $KEY_CONFIG_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
+				echo ""
+				exit 1
+            fi
+        fi
+    done < "$KEY_CONFIG_FILE"
+
+    #
+    # set any variables that rely on those keys
+    #
+
+    #
+    # Supply a local stash of keys for signing
+    #
+    # MODULE_SIG_KEY_SRCPREFIX is used in kernel makefile for the
+    #  path to CONFIG_MODULE_SIG_KEY ( defined in machine kernel config
+    #
+
+    ALL_SIGNING_KEYS="\
+        ONIE_VENDOR_SECRET_KEY_PEM=${KP_ONIE_VENDOR_SECRET_KEY_PEM} \
+        ONIE_VENDOR_CERT_DER=${KP_ONIE_VENDOR_CERT_DER} \
+        ONIE_VENDOR_CERT_PEM=${KP_ONIE_VENDOR_CERT_PEM} \
+        SHIM_SELF_SIGN_SECRET_KEY_PEM=${KP_SHIM_SELF_SIGN_SECRET_KEY_PEM} \
+        SHIM_SELF_SIGN_PUBLIC_CERT_PEM=${KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM} \
+		SHIM_PREBUILT_DIR=${KP_SHIM_PREBUILT_DIR} \
+		ONIE_MODULE_SIG_KEY_SRCPREFIX=${KP_MODULE_SIG_KEY_SRCPREFIX} \
+	"
+
+	if [ ! -e "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/" ];then
+		mkdir -p "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/"
+	fi
+
+	keyPath="${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/signing-key-paths.make"
+
+	echo ""
+	echo " ----------------------------------------------------"
+	echo "|"
+	echo "| Generating Secure Boot makefile fragment at:"
+	echo "| $keyPath"
+	echo "|"
+	echo " ----------------------------------------------------"
+	echo ""
+	# Make sure no trailing spaces, else the path has a ' ' in it,
+	# making it unfindable and awful to debug
+	echo "
+# Generated by $0 on $(date) 
+# Key path makefile fragment for $ONIE_MACHINE_TARGET
+ONIE_VENDOR_SECRET_KEY_PEM     = ${KP_ONIE_VENDOR_SECRET_KEY_PEM}
+ONIE_VENDOR_CERT_DER           = ${KP_ONIE_VENDOR_CERT_DER}
+ONIE_VENDOR_CERT_PEM           = ${KP_ONIE_VENDOR_CERT_PEM}
+SHIM_SELF_SIGN_SECRET_KEY_PEM  = ${KP_SHIM_SELF_SIGN_SECRET_KEY_PEM}
+SHIM_SELF_SIGN_PUBLIC_CERT_PEM = ${KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM}
+SHIM_PREBUILT_DIR              = ${KP_SHIM_PREBUILT_DIR}
+
+# Directory by onie/build-config/kernel.make to find keys
+ONIE_MODULE_SIG_KEY_SRCPREFIX  = ${KP_MODULE_SIG_KEY_SRCPREFIX}
+
+# GPG keys for signing kernel, grub in Extended Secure Boot
+GPG_SIGN_PUBRING               = ${KP_GPG_SIGN_PUBRING}
+GPG_SIGN_SECRING               = ${KP_GPG_SIGN_SECRING}
+
+" > "${keyPath}"
+
+	if [ ! -d "${KEY_UTILITIES_DIR}" ];then
+		mkdir -p "${KEY_UTILITIES_DIR}"
+	fi
+	if [ ! -d "${KEY_EFI_BINARIES_DIR}" ];then
+		mkdir -p "${KEY_EFI_BINARIES_DIR}"
+	fi
+	
+    # efi tools were placed by a 'make install' at container creation time
+    cp /usr/share/efitools/efi/*.efi "${KEY_EFI_BINARIES_DIR}/" || exit 1
+    cp /usr/bin/*efi*                "${KEY_EFI_BINARIES_DIR}/" || exit 1
+    cp /usr/bin/sb*                  "${KEY_UTILITIES_DIR}/"    || exit 1	
+    cp /usr/bin/sig-list-to-certs    "${KEY_UTILITIES_DIR}/"    || exit 1
+    cp /usr/bin/flash-var            "${KEY_UTILITIES_DIR}/"    || exit 1
+    fxnPS "Secure: USB-DRIVE efi binaries:"
+    ls -l ${KEY_EFI_BINARIES_DIR}
+    fxnPS "Secure: USB-DRIVE efi utilities:"
+    ls -l ${USB_XFER_EFI_UTILITIES_DIR}
+	
+	fxnWriteUEFIUpdateKeys
+#		KERNEL_SIGNING_KEY_DIR=${KP_KERNEL_SIGNING_KEY_DIR} 	
+#         MODULE_SIG_KEY=${KP_MODULE_SIG_KEY} 
+
+}
+
+#
+# Create a file that details where every key ends up being used.
+#
+function fxnGenerateCSVKeyFile()
+{
+    local fileName="$2"
+	
+    #
+    # Here, ONIE signed components would be the same as a Linux NOS
+    #
+    local ONIEVendorSecretKeyPEM="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-secret-key.pem"
+    local ONIEVendorCertDER="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-cert.der"
+    local ONIEVendorCertPEM="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-cert.pem"
+    local ONIEVendorKeyDir="${CRYPTO_DIR}/keys/ONIE/efi-keys"	
+
+    #
+    # This represents the 'third party signer' - like Microsoft
+    local ThirdPartySecretKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-database-key-secret-key.pem"
+    local ThirdPartyPublicKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-database-key-cert.pem"
+    local ThirdPartyKeyExchangeKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-key-exchange-key-cert.pem"
+
+    if [ "$fileName" = "" ];then		
+        fileName="$DEFAULT_KEY_CONFIG_FILE"
+    fi
+	# create a default file if none was specified, or return if this already happened.
+    if [ -e "$fileName" ];then
+        echo "Not generating a CSV key file because [ $fileName ] already exists. Try a different name for a new file."
+        return 0
+    fi
+
+    echo "Creating CSV key file named [ $fileName ]"
+
+    cat <<EOF >  ${fileName}
+# File generated by $0 on $(date)
+# This file provides a 1:1 correlation between keys and their use.
+# Fields - variable, path to key, empty space to terminate path
+#  Set Platform Key to: ${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-cert.der
+
+KP_ONIE_VENDOR_SECRET_KEY_PEM, ,${ONIEVendorSecretKeyPEM},
+KP_ONIE_VENDOR_CERT_DER,       ,${ONIEVendorCertDER},
+KP_ONIE_VENDOR_CERT_PEM,       ,${ONIEVendorCertPEM},
+
+KP_SHIM_SELF_SIGN_SECRET_KEY_PEM,  ,${ThirdPartySecretKey},
+KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM, ,${ThirdPartyPublicKey},
+# Directory used by MODULE_SIG_KEY_SRCPREFIX in onie/build-config/make/kernel.make
+KP_MODULE_SIG_KEY_SRCPREFIX,       ,${ONIEVendorKeyDir},
+
+# This key is built into the shim
+KP_SHIM_EMBED_DER,      ,${ONIEVendorCertDER},
+
+# Keys that sign shim
+KP_SHIM_SECRET_KEY,     ,${ThirdPartySecretKey},
+KP_SHIM_PUBLIC_CERT,    ,${ThirdPartyPublicKey},
+
+# Location of signed shim, fb, and mk efi files, used by images.make
+KP_SHIM_PREBUILT_DIR,   ,${SAFE_PLACE},
+
+# Keys that sign Grub
+KP_GRUB_SECRET_KEY,     ,${ONIEVendorSecretKeyPEM},
+KP_GRUB_PUBLIC_CERT,    ,${ONIEVendorCertPEM},
+
+# Keys that sign the kernel
+KP_KERNEL_SECRET_KEY,   ,${ONIEVendorSecretKeyPEM},
+KP_KERNEL_PUBLIC_CERT,  ,${ONIEVendorCertPEM},
+
+# Keys that sign grub in the recovery image
+KP_IMAGE_SECRET_KEY,    ,${ONIEVendorSecretKeyPEM},
+KP_IMAGE_PUBLIC_CERT,   ,${ONIEVendorCertPEM},
+
+# UEFI keys
+
+# Key Exchange Key database. Keys here can modify db/dbx entries
+KP_KEK_SOFTWARE_CERT,   ,${ThirdPartyKeyExchangeKey},
+KP_KEK_HARDWARE_CERT,   ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-key-exchange-key-cert.pem,
+
+# Key DataBase - keys here are available for shim/grub use too
+KP_DB_SOFTWARE_CERT,    ,${ThirdPartyPublicKey},
+KP_DB_HARDWARE_CERT,    ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-database-key-cert.pem,
+
+# Support for a third key in db, like a Network Operating System Vendor
+#KP_DB_EXTRA_CERT,       ,${CRYPTO_DIR}/keys/extra/key-exported-dev/dev-code-signing.pem,
+
+# Hardware manufacturer's keys
+KP_PLATFORM_CERT,       ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-cert.pem,
+KP_PLATFORM_SECRET_KEY, ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-secret-key.pem,
+
+# GPG Keys - used for signing kernel and grub in Extended Secure Boot
+KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
+KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
+
+# Location of signed shim
+KP_SHIM_PREBUILT_DIR,   ,${CRYPTO_DIR}/safe-place,
+
+EOF
+
+    echo ""
+    echo "Created: [ $fileName ]"
+    echo ""
+}
+
+# Rebuild the shim
+function fxnRebuildSHIM()
+{
+
+    local makeCommand="make $DOWNLOAD_CACHE -j8 V=1 ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} SECURE_BOOT_ENABLE=yes " #save typing
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Self signing shim                                 #"
+    echo "#                                                   #"
+    echo "#####################################################"
+
+    if [ -e "${SAFE_PLACE}/shimx64.efi" ];then
+        echo "Keeping signed shim"
+        return 0
+    fi
+
+    if [ ! -e "$KEY_CONFIG_FILE" ];then
+        echo "Using default keys."
+        # Hardcode for now
+        keyPrefix="ONIE"
+
+        # Key embedded in shim - typically NOS vendor's public key
+        shimEmbedDer="${keyDirPath}/${signerShim}/efi-keys/${keyPrefix}-shim-key-cert.der"
+        shimSecretKey="${keyDirPath}/${signerShim}/efi-keys/${keyPrefix}-database-key-secret-key.pem"
+        shimPublicCert="${keyDirPath}/${signerShim}/efi-keys/${keyPrefix}-database-key-cert.pem"
+    else
+        echo "Using keys from config file: [ $KEY_CONFIG_FILE ] "
+        #fxnReadKeyConfigFile
+
+        shimEmbedDer="$KP_SHIM_EMBED_DER"
+        shimSecretKey="$KP_SHIM_SECRET_KEY"
+        shimPublicCert="$KP_SHIM_PUBLIC_CERT"
+
+    fi
+
+    echo ""
+    echo "Signing keys"
+    echo "-----------------"
+    echo ""
+    echo "Shim"
+    echo "----"
+    echo "  Key embedded in shim: $shimEmbedDer"
+    echo "  Shim secret key:      $shimSecretKey"
+    echo "  Shim public key:      $shimPublicCert"
+    echo ""
+
+    $makeCommand shim-clean
+    # hardcode for now
+    keyPrefix="ONIE"
+    echo "Building shim with embedded vendor certificate [ $shimEmbedDer ]"
+    fxnEC $makeCommand \
+          ONIE_VENDOR_CERT_DER="$shimEmbedDer" shim \
+        || exit 1
+
+    echo "Signing shim with secret key [ $shimSecretKey ] and public certificate [ $shimPublicCert ]"
+
+    # Sign shim with SW vendor key
+    keyPrefix="SW"
+    signerShim="SW"
+
+    fxnEC $makeCommand \
+          SHIM_SELF_SIGN_SECRET_KEY_PEM="$shimSecretKey" \
+          SHIM_SELF_SIGN_PUBLIC_CERT_PEM="$shimPublicCert" \
+          shim-self-sign || exit 1
+
+    echo "Built shim efi binaries under build/${ONIE_MACHINE}/shim/shim-15/*efi* "
+
+    # put the shim in a location outside the build
+    fxnCopyShimSafe
+
+}
+#
+# Build just the components that need to be signed.
+# This assumes the keys were built using this script.
+function fxnBuildSignedOnly()
+{
+
+    local keyDirPath="$1"  # path to key directory
+    local keyPrefix="$2"   # prefix to wildcard match for keys
+    local makeCommand="make $DOWNLOAD_CACHE -j8 V=1 ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} SECURE_BOOT_ENABLE=yes " #save typing
+
+
+
+    # What new key is used to sign each component
+    local signerShim="ONIE"
+    local signerGrub="ONIE"
+    local signerKernel="ONIE"
+
+    keyDirPath="${NEW_KEYS_DIR}"
+    keyPrefix="ONIE"
+
+    # Hardcode for now. Make optional later
+    DO_REBUILD_SHIM="TRUE"
+
+    # Dump any loopback devices
+    losetup -D
+
+
+    # Get rid of staging directory to create USB drive
+    if [ -e "$USB_XFER_DIR" ];then
+        rm -rf "$USB_XFER_DIR"
+    fi
+
+    echo ""
+    if [ ! -e "$KEY_CONFIG_FILE" ];then
+        echo "Using default keys."
+
+        # Hardcode for now
+        keyPrefix="ONIE"
+
+        grubSecretKey="${keyDirPath}/${signerGrub}/efi-keys/${keyPrefix}-shim-key-secret-key.pem"
+        grubPublicCert="${keyDirPath}/${signerGrub}/efi-keys/${keyPrefix}-shim-key-cert.pem"
+
+        kernelSecretKey="${keyDirPath}/${signerKernel}/efi-keys/${keyPrefix}-shim-key-secret-key.pem"
+        kernelPublicCert="${keyDirPath}/${signerKernel}/efi-keys/${keyPrefix}-shim-key-cert.pem"
+
+        imageSecretKey="${keyDirPath}/${signerGrub}/efi-keys/${keyPrefix}-shim-key-secret-key.pem"
+        imagePublicCert="${keyDirPath}/${signerGrub}/efi-keys/${keyPrefix}-shim-key-cert.pem"
+    else
+        echo "Using keys from config file: [ $KEY_CONFIG_FILE ] "
+        #fxnReadKeyConfigFile
+
+        grubSecretKey="$KP_GRUB_SECRET_KEY"
+        grubPublicCert="$KP_GRUB_PUBLIC_CERT"
+
+        kernelSecretKey="$KP_KERNEL_SECRET_KEY"
+        kernelPublicCert="$KP_KERNEL_PUBLIC_CERT"
+
+        imageSecretKey="$KP_IMAGE_SECRET_KEY"
+        imagePublicCert="$KP_IMAGE_PUBLIC_CERT"
+    fi
+
+    if [ 1 = 1 ];then
+        echo ""
+        echo "Signing keys"
+        echo "-----------------"
+        echo ""
+        echo "Grub"
+        echo "----"
+        echo "  Grub secret key:      $grubSecretKey"
+        echo "  Grub public key:      $grubPublicCert"
+        echo ""
+        echo "Kernel"
+        echo "------"
+        echo "  Kernel secret key:    $kernelSecretKey"
+        echo "  Kernel public key:    $kernelPublicCert"
+        echo ""
+        echo "Image"
+        echo "-----"
+        echo "  Image secret key:     $imageSecretKey"
+        echo "  Image public key:     $imagePublicCert"
+        echo ""
+    fi
+
+
+    fxnGenerateKEKAndDBEFIVars
+
+
+    # A note on correlating the key signing:
+    # Variables pointing to keys are referenced in ./machine/${ONIE_MACHINE_TARGET}/make
+    # Those names match what is being passed here
+    # The keys here are located under the NEW_KEYS_DIR directory
+    if [ "$DO_REBUILD_SHIM" = "TRUE" ];then
+        fxnRebuildSHIM
+    fi
+
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Signing GRUB                                      #"
+    echo "#                                                   #"
+    echo "#####################################################"
+    fxnEC $makeCommand grub-clean || exit 1
+    fxnEC $makeCommand \
+          ONIE_VENDOR_SECRET_KEY_PEM="$grubSecretKey" \
+          ONIE_VENDOR_CERT_PEM="$grubPublicCert" \
+          grub || exit 1
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Signing kernel                                    #"
+    echo "#                                                   #"
+    echo "#####################################################"
+    fxnEC $makeCommand kernel-clean || exit 1
+    fxnEC $makeCommand \
+          ONIE_VENDOR_SECRET_KEY_PEM="$kernelSecretKey" \
+          ONIE_VENDOR_CERT_PEM="$kernelPublicCert" \
+          kernel || exit 1
+
+
+    # Redo the usb drive
+    fxnUSBStoreFiles "TRUE"
+
+    echo "#####################################################"
+    echo "#                                                   #"
+    echo "# Building image                                    #"
+    echo "#                                                   #"
+    echo "#####################################################"
+    # Redo the image
+    fxnEC $makeCommand image-clean machine-clean  || exit 1
+    fxnEC $makeCommand \
+          ONIE_VENDOR_SECRET_KEY_PEM="$imageSecretKey" \
+          ONIE_VENDOR_CERT_PEM="$imagePublicCert" \
+          SHIM_PREBUILT_DIR="$SAFE_PLACE" \
+          all recovery-initrd recovery-iso || exit 1
+
+    #makeKVM -j4 SECURE_BOOT=yes ONIE_VENDOR_SECRET_KEY=${NEW_KEYS_DIR}/efi-keys/onievendorkey-private_key.pem ONIE_VENDOR_CERT_PEM=${NEW_KEYS_DIR}/efi-keys/onievendorkey-certificate.pem SHIM_PREBUILT_DIR=
+    echo ""
+    echo "Make sure everything is in place to run by using:  $0 build-secure-boot"
+    echo ""
+}
+
+
+######################################################################
+# Editor hints for sh syntax interpretation
+# Append as necessary.
+######################################################################
+
+# For Emacs
+# Local Variables:
+# mode: sh
+# End:
+
