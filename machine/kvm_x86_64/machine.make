@@ -59,6 +59,10 @@ SKIP_ETHMGMT_MACS = yes
 # Enable building of secure boot binaries
 SECURE_BOOT_ENABLE = yes
 
+# Enable extended secure boot:
+#  Grub that verifies binaries and has a password
+#SECURE_BOOT_EXT = yes
+
 # ONIE_VENDOR_SECRET_KEY_PEM -- file system path to private RSA key
 # encoded in PEM format.
 #
@@ -70,7 +74,7 @@ SECURE_BOOT_ENABLE = yes
 # In this example, the machine is a demonstration vehicle and the
 # secret key is not sensitive.  It is reasonable for this key to
 # reside in the upstream code repository.
-ONIE_VENDOR_SECRET_KEY_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-secret-key.pem
+#A-ONIE_VENDOR_SECRET_KEY_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-secret-key.pem
 
 # ONIE_VENDOR_CERT_DER -- file system path to public vendor x509
 # certificate, encoded in DER format.
@@ -79,12 +83,13 @@ ONIE_VENDOR_SECRET_KEY_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-secret-key.pem
 # not expect the certificate to reside in the upstream code
 # repository.  Included here as this machine is a demonstration
 # vehicle.
-ONIE_VENDOR_CERT_DER = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.der
+#A-ONIE_VENDOR_CERT_DER = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.der
 
 # ONIE_VENDOR_CERT_PEM -- file system path to public vendor x509
 # certificate, encoded in PEM format.  Same as ONIE_VENDOR_CERT_DER,
 # but in PEM format.
-ONIE_VENDOR_CERT_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.pem
+# This is also used in the machine kernel config.
+#A-ONIE_VENDOR_CERT_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.pem
 
 # SHIM_SELF_SIGN_SECRET_KEY_PEM
 # SHIM_SELF_SIGN_PUBLIC_CERT_PEM
@@ -93,8 +98,9 @@ ONIE_VENDOR_CERT_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.pem
 # to simulate having shimx64.efi signed by a recognized signing
 # authority.  The certificate used here must be loaded into the DB on
 # the target system in order to verify the signature.
-SHIM_SELF_SIGN_SECRET_KEY_PEM  = $(MACHINEDIR)/x509/sw-vendor-DB-secret-key.pem
-SHIM_SELF_SIGN_PUBLIC_CERT_PEM = $(MACHINEDIR)/x509/sw-vendor-DB-cert.pem
+#A-SHIM_SELF_SIGN_SECRET_KEY_PEM  = $(MACHINEDIR)/x509/sw-vendor-DB-secret-key.pem
+#A-SHIM_SELF_SIGN_PUBLIC_CERT_PEM = $(MACHINEDIR)/x509/sw-vendor-DB-cert.pem
+
 
 # Console parameters can be defined here (default values are in
 # build-config/arch/x86_64.make).
@@ -118,6 +124,21 @@ SHIM_SELF_SIGN_PUBLIC_CERT_PEM = $(MACHINEDIR)/x509/sw-vendor-DB-cert.pem
 # Include additional files in the installer image.  This is useful to
 # share code between the ONIE run-time and the installer.
 UPDATER_IMAGE_PARTS_PLATFORM = $(MACHINEDIR)/rootconf/sysroot-lib-onie/test-install-sharing
+
+# Encryption keys, utilities, and signed binaries can be here.
+ENCRYPTIONDIR    = $(realpath ../encryption)
+
+# A 'safe place' to store data, like a signed shim...'
+SAFE_PLACE       = $(ENCRYPTIONDIR)/safe-place
+
+# For secure boot - include machine specific generated makefile fragment
+# which references signing keys. This will be created the first time keys
+# are generated for the platform using the encryption-tool.sh
+# and can be modified as needed.
+
+KEY_PATHS_MAKEFILE = $(ENCRYPTIONDIR)/machines/kvm_x86_64/signing-key-paths.make
+include $(KEY_PATHS_MAKEFILE)
+
 
 #-------------------------------------------------------------------------------
 #

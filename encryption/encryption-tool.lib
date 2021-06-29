@@ -1569,12 +1569,41 @@ function fxnGenerateCSVKeyFile()
 # Fields - variable, path to key, empty space to terminate path
 #  Set Platform Key to: ${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-cert.der
 
+# ONIE_VENDOR_SECRET_KEY_PEM -- file system path to private RSA key
+# encoded in PEM format.
+#
+# WARNING: This key is extremely sensitive and should be handled
+# carefully.  In practice, this key should never be checked into the
+# code repository.  Set ONIE_VENDOR_SECRET_KEY_PEM on the make command
+# line at build time.
+#
+# In this example, the machine is a demonstration vehicle and the
+# secret key is not sensitive.  It is reasonable for this key to
+# reside in the upstream code repository.
 KP_ONIE_VENDOR_SECRET_KEY_PEM, ,${ONIEVendorSecretKeyPEM},
+
+# ONIE_VENDOR_CERT_DER -- file system path to public vendor x509
+# certificate, encoded in DER format.
+#
+# Typically this variable is specified on the command line as we do
+# not expect the certificate to reside in the upstream code
+# repository.  Included here as this machine is a demonstration
+# vehicle.
 KP_ONIE_VENDOR_CERT_DER,       ,${ONIEVendorCertDER},
+
+# ONIE_VENDOR_CERT_PEM -- file system path to public vendor x509
+# certificate, encoded in PEM format.  Same as ONIE_VENDOR_CERT_DER,
+# but in PEM format.
+# This is also used in the machine kernel config.
 KP_ONIE_VENDOR_CERT_PEM,       ,${ONIEVendorCertPEM},
 
+# These two parameters are for testing purposes only.  They allow one
+# to simulate having shimx64.efi signed by a recognized signing
+# authority.  The certificate used here must be loaded into the DB on
+# the target system in order to verify the signature.
 KP_SHIM_SELF_SIGN_SECRET_KEY_PEM,  ,${ThirdPartySecretKey},
 KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM, ,${ThirdPartyPublicKey},
+
 # Directory used by MODULE_SIG_KEY_SRCPREFIX in onie/build-config/make/kernel.make
 KP_MODULE_SIG_KEY_SRCPREFIX,       ,${ONIEVendorKeyDir},
 
@@ -1617,14 +1646,23 @@ KP_DB_HARDWARE_CERT,    ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-database-key-cert.pem
 KP_PLATFORM_CERT,       ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-cert.pem,
 KP_PLATFORM_SECRET_KEY, ,${CRYPTO_DIR}/keys/HW/efi-keys/HW-platform-key-secret-key.pem,
 
-# GPG Keys - used for signing kernel and grub in Extended Secure Boot
-KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
-KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
-
 # Location of signed shim
 KP_SHIM_PREBUILT_DIR,   ,${CRYPTO_DIR}/safe-place,
 
 EOF
+
+	# The extended secure boot options (signed grub, etc) may not be
+	# part of the build unless the user has enabled them.
+	if [ "$ONIE_SECURE_BOOT_EXTENDED" = "TRUE" ];then
+    cat <<EOF >  ${fileName}
+
+# Secure Boot: extended
+# GPG Keys - used for signing kernel and grub in Extended Secure Boot
+KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
+KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
+
+EOF
+	fi
 
     echo ""
     echo "Created: [ $fileName ]"

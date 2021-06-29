@@ -575,7 +575,10 @@ function fxnApplyDefaults()
     # KVM defaults
     #    ONIE_KERNEL_VERSION="linux-4.19.143"
     #ONIE_MACHINE_TARGET="cumulus_vx"
-	ONIE_MACHINE_TARGET="kvm_x86_64"	
+	ONIE_MACHINE_TARGET="kvm_x86_64"
+
+	# Set for targets that have a manufacturer in their path
+	#ONIE_MACHINE_MANUFACTURER
     #     MACHINEROOT_DIR="MACHINEROOT=../machine/cumulus"
     #    MACHINEROOT_DIR=""
     DO_INTERACTIVE="FALSE"
@@ -595,6 +598,14 @@ function fxnApplyDefaults()
     ONIE_VMLINUX="../build/${ONIE_MACHINE}/kernel/${ONIE_KERNEL_VERSION}/vmlinux"
     ONIE_RECOVERY_ISO="../build/images/onie-recovery-x86_64-${ONIE_MACHINE}.iso"
     ONIE_DEMO_INSTALLER="../build/images/demo-installer-x86_64-${ONIE_MACHINE}.bin"
+	# If extended secure boot is active for this machine, case then note it
+
+	 grep -v '#' ../machine/${ONIE_MACHINE_MANUFACTURER}/${ONIE_MACHINE_TARGET}/machine.make | grep -q "SECURE_BOOT_EXT "
+	if [ $? = 0 ];then
+		ONIE_SECURE_BOOT_EXTENDED="TRUE"
+	else
+		ONIE_SECURE_BOOT_EXTENDED="FALSE"
+	fi
 
 }
 

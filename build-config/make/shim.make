@@ -110,7 +110,7 @@ $(SHIM_BUILD_STAMP): $(SHIM_PATCH_STAMP) $(SHIM_NEW_FILES) $(GNU_EFI_INSTALL_STA
 	$(Q) rm -f $@ && eval $(PROFILE_STAMP)
 	$(Q) echo "====  Building shim-$(SHIM_VERSION) ===="
 	$(Q) echo "Using ONIE vendor certificate: $(ONIE_VENDOR_CERT_DER)"
-	$(Q) openssl x509 -in "$(ONIE_VENDOR_CERT_DER)" -inform der -text -noout
+	$(Q) openssl x509 -in '$(ONIE_VENDOR_CERT_DER)' -inform der -text -noout
 	$(Q) PATH='$(CROSSBIN):$(PESIGN_BIN_DIR):$(PATH)'	\
 		$(MAKE) -C $(SHIM_DIR) $(SHIM_BUILD_ARGS)
 	$(Q) PATH='$(CROSSBIN):$(PESIGN_BIN_DIR):$(PATH)'	\
@@ -137,15 +137,20 @@ endif
 	done
 	$(Q) touch $@
 
-shim-self-sign: $(SHIM_SELF_SIGN_STAMP)
+shim-self-sign: $(SHIM_SELF_SIGN_STAMP) 
 $(SHIM_SELF_SIGN_STAMP): $(SHIM_BUILD_STAMP) | $(DEV_SYSROOT_INIT_STAMP)
 	$(Q) rm -f $@ && eval $(PROFILE_STAMP)
 	$(Q) echo "====  Self signing shim-$(SHIM_VERSION) ===="
 	$(Q) echo "This is for testing purposes only."
 	$(Q) sbsign --key $(SHIM_SELF_SIGN_SECRET_KEY_PEM) \
 		--cert $(SHIM_SELF_SIGN_PUBLIC_CERT_PEM) \
-		--output "$(SHIM_INSTALL_DIR)/shim$(EFI_ARCH).efi.signed" \
-		"$(SHIM_INSTALL_DIR)/shim$(EFI_ARCH).efi"
+		--output "$(SAFE_PLACE)/shim$(EFI_ARCH).efi.signed" \
+		"$(SHIM_DIR)/shim$(EFI_ARCH).efi"
+	$(Q) cp "$(SAFE_PLACE)/shim$(EFI_ARCH).efi.signed" "$(SAFE_PLACE)/shim$(EFI_ARCH).efi"
+	$(Q) cp "$(SHIM_DIR)/shim$(EFI_ARCH).efi" "$(SAFE_PLACE)/shim$(EFI_ARCH).efi.unsigned"
+	$(Q) cp "$(SHIM_DIR)/fb$(EFI_ARCH).efi" "$(SAFE_PLACE)"
+	$(Q) cp "$(SHIM_DIR)/mm$(EFI_ARCH).efi" "$(SAFE_PLACE)"
+	$(Q) echo "== Signed output self signed shim from $(SHIM_INSTALL_DIR)/shim$(EFI_ARCH).efi to $(SAFE_PLACE)"
 	$(Q) touch $@
 
 MACHINE_CLEAN += shim-clean
