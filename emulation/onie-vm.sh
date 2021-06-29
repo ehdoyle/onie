@@ -1,4 +1,10 @@
 #!/bin/bash
+#-------------------------------------------------------------------------------
+#
+#  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
+#
+#-------------------------------------------------------------------------------
+
 # SCRIPT_PURPOSE: Automate and provide examples for running ONIE in emulation.
 
 # OVERVIEW

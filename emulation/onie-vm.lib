@@ -1,6 +1,10 @@
+#-------------------------------------------------------------------------------
 #
-# Functions for running emulated ONIE machine targets
+#  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
 #
+#-------------------------------------------------------------------------------
+
+# SCRIPT_PURPOSE: Functions for running emulated ONIE machine targets
 
 # User instructions to read for UEFI
 UEFI_INSTRUCTIONS_TXT="ReadmeUEFI.txt"

@@ -1,4 +1,10 @@
 #!/bin/bash
+#-------------------------------------------------------------------------------
+#
+#  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
+#
+#-------------------------------------------------------------------------------
+
 # SCRIPT_PURPOSE: Automate and provide examples of KVM workflows.
 
 # NOTE that there are other debug permutations around running kernel(debug)/initrd that
@@ -26,6 +32,7 @@ fi
 
 ONIE_TOP_DIR=$( realpath $(pwd)/..)
 
+ENCRYPTION_DIR="${ONIE_TOP_DIR}/encryption"
 
 if [ "$1" = "--debug" ];then
     echo "Enabling top level --debug"
@@ -35,9 +42,8 @@ if [ "$1" = "--debug" ];then
 fi
 
 ONIE_MACHINE_TARGET="kvm_x86_64"
-#ONIE_MACHINE_TARGET="cumulus_vx"
-#MACHINEROOT_DIR="MACHINEROOT=../../machine/cumulus"
-#MACHINEROOT_DIR="MACHINEROOT=../machine/kvm_x86_64"
+# path to manfuacturer, if any
+MANUFACTURER_DIR=""
 MACHINE_BUILD_TARGET="MACHINE=${ONIE_MACHINE_TARGET}"
 
 # If true, defaults set in fxnApplyDefaults are set.
@@ -139,7 +145,6 @@ function fxnPS()
 {
     echo "Step: [ $STEP_COUNT ] $1"
 
-    fxnPauseForUser
 
     STEP_COUNT=$(( STEP_COUNT +1 ))
 
@@ -160,10 +165,6 @@ function fxnHelp()
     echo ""
     echo " Build commands:"
     echo "  clean               - Clean everything but the cross compile tools."
-    echo "  build               - KVM build without Secure Boot."
-    echo "  build-secure-boot   - Build signed grub, kernel, shim. Create second drive"
-    echo "                          with signing keys for install in boot manager."
-    echo "  build-shim          - Rebuild and sign the shim"
     echo "  build-uefi-vars     - generate kek-all.auth and db-all.auth"
     echo "  build-uefi-db-key <key> - Convert certifcate public key into uefi format to add to db."
     echo ""
@@ -183,6 +184,7 @@ function fxnHelp()
     echo "                        Keys end up under onie/encryption/keys/"
     echo "  generate-key-file <name> Create a CSV file that details where every key gets used. [ $DEFAULT_KEY_CONFIG_FILE]"
     echo "  --key-config-file <name> Use this CSV file rather than the default [ $DEFAULT_KEY_CONFIG_FILE]"
+    echo "  update-keys           Have code recognize new key locations. Updates makefile fragment."
     echo ""
     echo " Informational commands:"
     echo "  info-check-signed   - What has(n't) been signed?"
@@ -232,209 +234,21 @@ function fxnPauseForUser()
     fi
 }
 
-#
-# Create a clean virtual hard drive to install on.
-# Keep an unmodified backup copy for easy reversion.
-#
-function fxnCreateHardDrive ()
-{
-    if [ ! -e $HARD_DRIVE ];then
-        fxnPS "Creating qcow2 image $HARD_DRIVE to use as 'hard drive'"
-        qemu-img create -f qcow2 -o preallocation=full  $HARD_DRIVE ${HARD_DRIVE_SIZE}G || exit 1
-        if [ -e "$CLEAN_HARD_DRIVE" ];then
-            rm "$CLEAN_HARD_DRIVE"
-        fi
-    fi
-
-    # Keep a copy of this that has not been installed on for debug purposes.
-    if [ ! -e "$CLEAN_HARD_DRIVE" ];then
-        echo "Creating untouched $HARD_DRIVE image at $CLEAN_HARD_DRIVE for reference."
-        rsync --progress "$HARD_DRIVE" "$CLEAN_HARD_DRIVE"
-    fi
-
-}
-
-#
-# Populating a qcow2 image involves a loopback mount,
-# which containers only support if they're run
-# in --privileged mode,
-# So this is a separate step in case it is being run
-# OUTSIDE of the container, as root.
-#
-# Takes: if $1 = TRUE, delete existing drive and create fresh."
-fxnUSBStoreFiles()
-{
-    local loop
-    local deleteExistingDrive="$1"
-
-    # If it has been built, then return.
-    if [  -e $USB_IMG ];then
-        if [ "$deleteExistingDrive" = "rebuild" ];then
-            echo "Deleting existing virtual USB drive at [ $USB_IMG ] "
-            rm $USB_IMG
-        else
-            fxnPS "$USB_IMG is present. Continuing."
-            return 0
-        fi
-    fi
-
-    echo "#####################################################"
-    echo "#                                                   #"
-    echo "# Building virtual USB drive /dev/vdb               #"
-    echo "#                                                   #"
-    echo "#####################################################"
-
-    echo ""
-    echo " Run as root "
-    echo ""
-
-    if [  -e /.dockerenv ]; then
-        # In a container, then
-        echo ""
-        losetup --find
-        if [ $? = 0 ];then
-            echo "Found loopback in Docker container. Running --privileged. Continuing."
-        else
-            fxnWARN "Failed to find loopback devices in container."
-            echo "The container was probably not run with host /dev mounted and '--privileged'."
-            echo "You can run the creation of the USB filesystem image outside of container."
-            return 1
-        fi
-    fi
-
-    # At this point, running in a Docker container that mounts /dev,
-    # or on a host where the user can sudo
-    if [ ! -e /usr/bin/qemu-img ];then
-        echo "/usr/bin/qemu-img not found. Installing..."
-        sudo apt-get install qemu-utils || exit 1
-    else
-        echo "Found /usr/bin/qemu-img, continuing..."
-    fi
-
-    if [ ! -e $USB_MNT_DIR ];then
-        echo "Creating mount point for loopback of USB file system."
-        sudo mkdir -p $USB_MNT_DIR
-    fi
-    fxnPS "Creating '$USB_IMG'"
-    qemu-img create -f raw ${USB_IMG}.raw "$USB_SIZE" || exit 1
-
-    # And this would be the part one needs to be external for.
-    # Try it in case the container is running --privileged
-    loop=$( sudo /sbin/losetup  -f ${USB_IMG}.raw --show )
-    if [ $? != 0 ];then
-        echo "ERROR! Loopback mount of USB drive filesystem failed. (sudo /sbin/losetup  -f ${USB_IMG}.raw --show )"
-        if [  -e /.dockerenv ]; then
-            echo "Try virtual-usb outside of the container as root."
-            echo ""
-            exit 1
-        fi
-    fi
-    echo " Accessing $USB_IMG raw filesystem via $loop"
-    sudo mkdosfs -n "ONIE USB-DRIVE " $loop || exit 1
-    if [ ! -e $USB_MNT_DIR ];then
-        mkdir -p $USB_MNT_DIR || exit 1
-    fi
-    sudo mount $loop $USB_MNT_DIR || exit 1
-
-    #
-    # If changing keys around, make sure the USB drive is populated from
-    # the usb transfer area
-    fxnPopulateUSBTransfer
-
-    #
-    # Since loopback mounts will only work in a container if it has been
-    # run with docker --privileged, having all the files copied into USB_XFER_DIR
-    # as a staging area allows the this step to be run outside of a container as
-    # well as inside one.
-    #
-    fxnPS "Secure: Copying over everything from $USB_XFER_DIR to $USB_MNT_DIR"
-
-    # As this is a relative path, it should work in and out of the container.
-    # Use rsync to skip copy of GPG sockets.
-    fxnEC sudo rsync --recursive --no-specials --no-devices $USB_XFER_DIR/* $USB_MNT_DIR/ || exit 1
-
-    if [ "$USB_SECURE_BOOT" = "TRUE" ];then
-        if [ ! -e ${KEY_EFI_BINARIES_DIR}/UpdateVars.efi ];then
-            echo "ERROR - UpdateVars.efi not found, so you can't apply these keys."
-            exit 1
-        fi
-    fi
-
-    if [ -e ../build/images/demo-installer-x86_64-${ONIE_MACHINE}.bin ];then
-        sudo cp --verbose ../build/images/*installer-x86_64-${ONIE_MACHINE}*.bin  $USB_MNT_DIR/ || exit 1
-    fi
-    echo "============== USB Drive contains =========================="
-    if [ "$USB_SECURE_BOOT" = "TRUE" ];then
-        echo "== Hardware vendor keys:"
-        ls -l "${USB_MNT_DIR}"/keys/${HW_VENDOR_PREFIX}
-        echo ""
-        echo "== Software vendor keys:"
-        ls -l "${USB_MNT_DIR}"/keys/${SW_VENDOR_PREFIX}
-        echo ""
-        echo "== ONIE vendor keys:"
-        ls -l "${USB_MNT_DIR}"/keys/${ONIE_VENDOR_PREFIX}
-        echo ""
-        echo "== Efi binaries:"
-        ls -l "${USB_MNT_DIR}"/efi-binaries/*.efi
-        echo ""
-        echo "== Utilities:"
-        #   ls -l "${USB_MNT_DIR}" | grep -v "${ONIE_VENDOR_PREFIX}\|${SW_VENDOR_PREFIX}\|${HW_VENDOR_PREFIX}\|.efi"
-        ls -l "${USB_MNT_DIR}"/utilities/*
-        echo ""
-        echo "== demo images:"
-        ls -l "${USB_MNT_DIR}"/demo*bin
-        echo ""
-        echo "== Top level directory "
-        ls -l "${USB_MNT_DIR}"
-
-        tree  "${USB_MNT_DIR}"
-    else
-        echo "== ${USB_MNT_DIR}"
-        tree "${USB_MNT_DIR}"
-    fi
-
-    echo "============== End USB Drive contents ======================"
-    # Install of external sbverify not guaranteed
-    #   echo "  sbverify --no-verify $USB_MNT_DIR/kvm-images/${ONIE_MACHINE}.vmlinuz"
-    #   sbverify --no-verify $USB_MNT_DIR/kvm-images/${ONIE_MACHINE}.vmlinuz || exit 1
-    #   fxnPS "Confimred  $USB_MNT_DIR/kvm-images/${ONIE_MACHINE}.vmlinuz is signed."
-
-    #TODO: consider making this an exit trap so we don't run out of loop devices,
-    #      if debugging builds
-    sudo umount $loop
-    sudo /sbin/losetup -d $loop
-
-    fxnPS "Secure: converting $USB_IMG format from .raw to .qcow2 in $KVM_DIR"
-    qemu-img convert -f raw -O qcow2 ${USB_IMG}.raw ${USB_IMG}.qcow2 || exit 1
-    echo ""
-    fxnPS "Secure: Done creating 'usb drive'"
-    ls -l "${KVM_DIR}"/*.qcow2
-
-    echo " #"
-    echo " # To continue:"
-    echo " #  Use $0 --qemu-embed-onie --qemu-usb-drive "
-    echo ""
-
-}
 
 #
 # Clean out all staged keys and USB images as well
 # as the kvm code
 function fxnMakeClean()
 {
+    local keyPathsDir="${ENCRYPTION_DIR}/machines/${ONIE_MACHINE_TARGET}"
+    local keyPathsFile="${keyPathsDir}/signing-key-paths.make"
     if [ $(basename $(pwd)) != "encryption" ];then
-        echo "Must run from onie/encryption."
+        echo "Must run from ${ENCRYPTION_DIR}."
         exit 1
     fi
     echo "Doing encryption cleaning."
+    echo "  Deleting keys directory"
     rm -rf keys
-    rm -rf machines
-    return 0
-
-    if [ $(basename $(pwd)) != "build-config" ];then
-        echo "$0 must be run from onie/build-config. Exiting."
-        exit 1
-    fi
 
     echo "=== Cleaning Secure Boot artifiacts."
 
@@ -443,130 +257,34 @@ function fxnMakeClean()
         rm -rf "$USB_XFER_DIR"
     fi
 
-
-    echo ""
-    echo " Make clean with: $MACHINEROOT_DIR MACHINE=${ONIE_MACHINE_TARGET} clean "
-    make $MACHINEROOT_DIR MACHINE=${ONIE_MACHINE_TARGET} clean
-
-    echo ""
-    echo "Done cleaning everything except the build tools and the safe place."
-
-    if [ -e "$SAFE_PLACE" ];then
-        echo ""
-        echo " If you want to wipe the signed shim and keys, then:"
-        echo "   rm -r $SAFE_PLACE"
-        echo ""
-        #        echo "  Deleting      $SAFE_PLACE"
-        #        rm -rf $SAFE_PLACE
-        # clean signed and unsigned shims
-        #rm -rf "${SAFE_PLACE}/shim*efi*"
-        #rm -rf "${SAFE_PLACE}/mm*efi*"
-        #rm -rf "${SAFE_PLACE}/fb*efi*"
-
+    # If necessary, create a dummy key path file so the make clean won't fail to find it.
+    if [ ! -e "$keyPathsFile" ];then
+        mkdir -p "$keyPathsDir"
+        touch "$keyPathsFile"
     fi
 
-    echo "Removing existing shim."
+    cd ../build-config
+    echo ""
 
-    #    SHIM_PREBUILT_DIR=/home/adoyle/ONIE/vxDev/cleanRebuild/onie-cn/onie/safe-place#
-    make "$MACHINEROOT_DIR" MACHINE="$ONIE_MACHINE_TARGET" V=1 clean
-    exit
 
+    echo " Make clean with: $MANUFACTURER_DIR MACHINE=${ONIE_MACHINE_TARGET} clean "
+    if [ "$MANUFACTURER_DIR" = "" ];then
+        # Targets like kvm_x86_64 may not have a manfuacturer directory
+        make  MACHINE="$ONIE_MACHINE_TARGET"  clean
+    else
+        make "$MANUFACTURER_DIR" MACHINE="$ONIE_MACHINE_TARGET"  clean
+    fi
+
+    cd "${ENCRYPTION_DIR}"
+
+    # Delete this last, as it has the signing-key-paths.make file, and the
+    # make clean will fail if that is missing
+    echo "  Deleting machines directory."
+    rm -rf machines
+
+    echo "Done clean"
 }
 
-#
-# Do the KVM build, and sign things.
-#
-function fxnBuildKVM()
-{
-
-    #
-    # Since the "USB Drive" of addtional files gets created outside
-    # the container, use this directory to hold all the files from
-    # inside the container we'd like to see on that drive.
-    #
-    if [ ! -e "$USB_XFER_DIR" ];then
-        echo "Secure: creating directories to hold 'usb drive' contents at: $USB_XFER_DIR"
-        mkdir -p "$USB_XFER_DIR"     \
-              "$USB_XFER_KEY_DIR"          \
-              "$USB_XFER_HW_KEY_DIR"       \
-              "$USB_XFER_SW_KEY_DIR"       \
-              "$USB_XFER_ONIE_KEY_DIR"     \
-              "$KEY_EFI_BINARIES_DIR" \
-              "$KEY_UTILITIES_DIR"   || exit 1
-    else
-        echo " $USB_XFER_DIR exists"
-    fi
-    echo "USB transfer drive directory contains."
-    tree "$USB_XFER_DIR"
-
-    if [ "$BUILD_SECURE_BOOT" != "TRUE" ];then
-        echo "     time make SECURE_BOOT_ENABLE=no $MACHINEROOT_DIR MACHINE=${ONIE_MACHINE_TARGET} -j8 all demo recovery-iso "
-        time fxnEC make $DOWNLOAD_CACHE SECURE_BOOT_ENABLE=no $MACHINEROOT_DIR MACHINE=${ONIE_MACHINE_TARGET} -j8 all demo recovery-iso || exit 1
-    else
-        # Sourced from kvm-secure.lib
-        # Where MAKE_TARGET is 'all' or 'grub', etc.
-        fxnBuildSecure "$MAKE_TARGET"
-
-    fi
-    #    fxnPS "Starting by building unsigned kvm target:"
-    #    time make V=1 -j8 ${MACHINE_BUILD_TARGET} all demo recovery-iso  > secure-1-build-unsigned-kvm.log 2>&1 || exit 1
-
-
-    if [ ! -e $KVM_DIR ];then
-        echo "Secure: creating $KVM_DIR to store KVM files in."
-        mkdir -p $KVM_DIR
-    else
-        echo "$KVM_DIR exists."
-    fi
-
-    #
-    # Use copies of the system's local install of ovmf for UEFI emulation
-    #
-    if [ ! -e "${KVM_DIR}/OVMF.fd" ];then
-        fxnPS "NOT Secure: USB-DRIVE: Copying unmodified $UEFI_BIOS_SOURCE from the ovmf package: to ${KVM_DIR}/"
-        cp "$UEFI_BIOS_SOURCE"  ${KVM_DIR}/ || exit 1
-    else
-        fxnPS "UEFI BIOS from OVMF.fd already exists in ${KVM_DIR}/"
-    fi
-
-    if [ ! -e "${KVM_DIR}/OVMF_CODE.fd" ];then
-        fxnPS "NOT Secure: USB-DRIVE: Copying unmodified $UEFI_BIOS_SOURCE_CODE from the ovmf package: to ${KVM_DIR}/"
-        cp "$UEFI_BIOS_SOURCE_CODE"  ${KVM_DIR}/ || exit 1
-    else
-        fxnPS "UEFI BIOS code file from OVMF_CODE.fd already exists in ${KVM_DIR}/"
-    fi
-
-    if [ ! -e "${KVM_DIR}/OVMF_VARS.fd" ];then
-        fxnPS "NOT Secure: USB-DRIVE: Copying unmodified $UEFI_BIOS_SOURCE_VARS from the ovmf package: to ${KVM_DIR}/"
-        cp "$UEFI_BIOS_SOURCE_VARS"  ${KVM_DIR}/ || exit 1
-    else
-        fxnPS "UEFI BIOS variable storage file from OVMF_VARS.fd already exists in ${KVM_DIR}/"
-    fi
-
-
-    fxnPS "Copying build products from ${BUILD_DIR}/images/*${ONIE_MACHINE_TARGET}* to: ${KVM_DIR}/"
-
-    cp ${BUILD_DIR}/images/*${ONIE_MACHINE_TARGET}* ${KVM_DIR}/|| exit 1
-
-    # Create a target filesystem for install and a backup copy.
-    fxnCreateHardDrive
-
-    echo " $KVM_DIR contents"
-    ls -l ${KVM_DIR}
-
-    #
-    # create a USB image to have all the files stuffed into USB_XFER_DIR
-    #
-    #
-    if [ "$DO_QEMU_USB_DRIVE" = "TRUE" ];then
-        if [ ! -e $USB_IMG ];then
-            fxnUSBStoreFiles
-        else
-            fxnPS "Secure: $USB_IMG is present. Continuing."
-        fi
-    fi
-
-}
 
 
 # One stop to set default values for the run.
@@ -579,8 +297,8 @@ function fxnApplyDefaults()
 
     # Set for targets that have a manufacturer in their path
     #ONIE_MACHINE_MANUFACTURER
-    #     MACHINEROOT_DIR="MACHINEROOT=../machine/cumulus"
-    #    MACHINEROOT_DIR=""
+    #     MANUFACTURER_DIR="MACHINEROOT=../machine/cumulus"
+    #    MANUFACTURER_DIR=""
     DO_INTERACTIVE="FALSE"
     # Just edit these in place
     if [ "$APPLY_HARDCODE_DEFAULTS" = "TRUE" ];then
@@ -671,11 +389,6 @@ do
             DO_CLOBBER="TRUE"
             ;;
 
-        # rebuild the ONIE target
-        build )
-            DO_BUILD="TRUE"
-            ;;
-
         # Generate signing keys
         generate-keys )
             if [ "$5" = "" ];then
@@ -714,18 +427,14 @@ do
             exit
             ;;
 
+        update-keys )
+            # read keys from the csv file and update where needed.
+            fxnUpdateKeyData
+            exit
+            ;;
+
         --interactive )
             DO_INTERACTIVE="TRUE"
-            ;;
-
-        # Build a particular target with existing machine prefixes.
-        --make-target )
-            MAKE_TARGET="$2"
-            shift
-            ;;
-
-        --download-cache )
-            DOWNLOAD_CACHE=" ONIE_USE_SYSTEM_DOWNLOAD_CACHE=TRUE "
             ;;
 
 
@@ -737,6 +446,7 @@ do
             ONIE_MACHINE_TARGET="$2"
             shift
             ;;
+
         --machine-revision )
             if [ "$2" = "" ];then
                 echo "ERROR! Must supply a machine revision: ex '-r0'. Exiting."
@@ -744,28 +454,6 @@ do
             fi
             ONIE_MACHINE_REVISION="$2"
             shift
-            ;;
-
-        build-secure-boot )
-            # Build the ONIE target
-            DO_BUILD="TRUE"
-            # Got through signing everything.
-            BUILD_SECURE_BOOT="TRUE"
-            # A virtual USB drive should expect to have secure boot files
-            USB_SECURE_BOOT="TRUE"
-            # Create a second filesystem to store keys that must be loaded
-            # in to the bios, and have that present as a USB drive.
-            DO_QEMU_USB_DRIVE="TRUE"
-            ;;
-
-        build-signed-only )
-            # Only rebuild components that need to be signed.
-            DO_BUILD_SIGNED_ONLY="TRUE"
-            ;;
-
-        build-shim )
-            # test build the shim
-            DO_BUILD_SHIM_ONLY="TRUE"
             ;;
 
         build-uefi-vars )
@@ -822,11 +510,10 @@ fi
 # Hardcore cleaning
 if [ "$DO_CLOBBER" = "TRUE" ];then
     fxnMakeClean
-    rm -rf safe-place/*
+    echo "Deleting safe-place/*efi*"
+    rm -rf safe-place/*efi*
     rm -rf ../emulation/emulation-files/usb/usb-data/*
-    cd ../build-config
-    make clean
-
+    exit
 fi
 
 # Always read a file if it exists, create and use defaults if it doesn't
@@ -835,38 +522,5 @@ fxnReadKeyConfigFile
 
 if [ "$DO_BUILD_UEFI_VARS" = "TRUE" ];then
     fxnGenerateKEKAndDBEFIVars
-fi
-# Copy and use OVMF_VARS file here
-# Handy to test different pre-configured BIOS settings
-# Different hardware/owner keys, for example.
-if [ "$USE_OVMF_VARS_FILE" != "" ];then
-    echo "Using saved OVMF_VARS file."
-    echo "  Deleting old ${KVM_DIR}/OVMF_VARS.fd"
-    rm "${KVM_DIR}/OVMF_VARS.fd"
-    echo "  Replacing with:  [ $USE_OVMF_VARS_FILE ]"
-    cp "$USE_OVMF_VARS_FILE" "${KVM_DIR}/OVMF_VARS.fd"
-fi
-
-
-if [ "$DO_BUILD_SHIM_ONLY" = "TRUE" ];then
-    fxnRebuildSHIM
-    exit
-fi
-
-# Just rebuild components that need to be signed.
-# Useful when debugging key configurations.
-if [ "$DO_BUILD_SIGNED_ONLY" = "TRUE" ];then
-    fxnBuildSignedOnly
-    exit
-fi
-
-
-if [ "$DO_BUILD" = "TRUE" ];then
-    if [ -e /.dockerenv ];then
-        fxnBuildKVM
-    else
-        echo "Error: Trying to build outside a DUE container."
-        exit 1
-    fi
 fi
 
