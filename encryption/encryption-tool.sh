@@ -165,7 +165,7 @@ function fxnHelp()
     echo "                          with signing keys for install in boot manager."
     echo "  build-shim          - Rebuild and sign the shim"
     echo "  build-uefi-vars     - generate kek-all.auth and db-all.auth"
-	echo "  build-uefi-db-key <key> - Convert certifcate public key into uefi format to add to db."
+    echo "  build-uefi-db-key <key> - Convert certifcate public key into uefi format to add to db."
     echo ""
     echo "  build-signed-only   - Only build components that need to be signed."
     echo "  --download-cache    - Use download cache in /var/cache/onie/download."
@@ -423,14 +423,14 @@ fxnUSBStoreFiles()
 function fxnMakeClean()
 {
     if [ $(basename $(pwd)) != "encryption" ];then
-		echo "Must run from onie/encryption."
-		exit 1
-	fi
-	echo "Doing encryption cleaning."
-	rm -rf keys
-	rm -rf machines
-	return 0
-		
+        echo "Must run from onie/encryption."
+        exit 1
+    fi
+    echo "Doing encryption cleaning."
+    rm -rf keys
+    rm -rf machines
+    return 0
+
     if [ $(basename $(pwd)) != "build-config" ];then
         echo "$0 must be run from onie/build-config. Exiting."
         exit 1
@@ -575,10 +575,10 @@ function fxnApplyDefaults()
     # KVM defaults
     #    ONIE_KERNEL_VERSION="linux-4.19.143"
     #ONIE_MACHINE_TARGET="cumulus_vx"
-	ONIE_MACHINE_TARGET="kvm_x86_64"
+    ONIE_MACHINE_TARGET="kvm_x86_64"
 
-	# Set for targets that have a manufacturer in their path
-	#ONIE_MACHINE_MANUFACTURER
+    # Set for targets that have a manufacturer in their path
+    #ONIE_MACHINE_MANUFACTURER
     #     MACHINEROOT_DIR="MACHINEROOT=../machine/cumulus"
     #    MACHINEROOT_DIR=""
     DO_INTERACTIVE="FALSE"
@@ -598,14 +598,14 @@ function fxnApplyDefaults()
     ONIE_VMLINUX="../build/${ONIE_MACHINE}/kernel/${ONIE_KERNEL_VERSION}/vmlinux"
     ONIE_RECOVERY_ISO="../build/images/onie-recovery-x86_64-${ONIE_MACHINE}.iso"
     ONIE_DEMO_INSTALLER="../build/images/demo-installer-x86_64-${ONIE_MACHINE}.bin"
-	# If extended secure boot is active for this machine, case then note it
+    # If extended secure boot is active for this machine, case then note it
 
-	 grep -v '#' ../machine/${ONIE_MACHINE_MANUFACTURER}/${ONIE_MACHINE_TARGET}/machine.make | grep -q "SECURE_BOOT_EXT "
-	if [ $? = 0 ];then
-		ONIE_SECURE_BOOT_EXTENDED="TRUE"
-	else
-		ONIE_SECURE_BOOT_EXTENDED="FALSE"
-	fi
+    grep -v '#' ../machine/${ONIE_MACHINE_MANUFACTURER}/${ONIE_MACHINE_TARGET}/machine.make | grep -q "SECURE_BOOT_EXT "
+    if [ $? = 0 ];then
+        ONIE_SECURE_BOOT_EXTENDED="TRUE"
+    else
+        ONIE_SECURE_BOOT_EXTENDED="FALSE"
+    fi
 
 }
 
@@ -667,10 +667,10 @@ do
             DO_CLEAN="TRUE"
             ;;
 
-		clobber )
-			DO_CLOBBER="TRUE"
-			;;
-		
+        clobber )
+            DO_CLOBBER="TRUE"
+            ;;
+
         # rebuild the ONIE target
         build )
             DO_BUILD="TRUE"
@@ -708,12 +708,12 @@ do
             exit
             ;;
 
-		read-key-file )
-			fxnReadKeyConfigFile
-			echo "$ALL_SIGNING_KEYS"
-			exit
-			;;
-		
+        read-key-file )
+            fxnReadKeyConfigFile
+            echo "$ALL_SIGNING_KEYS"
+            exit
+            ;;
+
         --interactive )
             DO_INTERACTIVE="TRUE"
             ;;
@@ -773,12 +773,12 @@ do
             DO_BUILD_UEFI_VARS="TRUE"
             ;;
 
-		build-uefi-db-key )
-			fxnAddUEFIDBKey "$2"
-			exit
-			;;
-		
-        info-check-signed )
+        build-uefi-db-key )
+            fxnAddUEFIDBKey "$2"
+            exit
+            ;;
+
+        info-check-signed | audit )
             # Check all things that could be signed
             fxnVerifySigned
             exit 0
@@ -816,17 +816,17 @@ done
 
 if [ "$DO_CLEAN" = "TRUE" ];then
     fxnMakeClean
-	exit 
+    exit
 fi
 
 # Hardcore cleaning
 if [ "$DO_CLOBBER" = "TRUE" ];then
-	fxnMakeClean
-	rm -rf safe-place/*
-	rm -rf ../emulation/emulation-files/usb/usb-data/*
-	cd ../build-config
-	make clean
-	
+    fxnMakeClean
+    rm -rf safe-place/*
+    rm -rf ../emulation/emulation-files/usb/usb-data/*
+    cd ../build-config
+    make clean
+
 fi
 
 # Always read a file if it exists, create and use defaults if it doesn't

@@ -184,24 +184,28 @@ function fxnVerifySigned() {
 
     local found="FALSE"
     local theFile
-	local verbose="not-verbose"
-    #local verbose="verbose"	
+    local verbose="not-verbose"
+    local errorLog=""
+
+    #local verbose="verbose"
     if [ -e "$NEW_KEYS_DIR" ];then
         echo "###################################################"
         echo "# Checking with keys under:                        "
-		echo "#  [ $NEW_KEYS_DIR ]"
-		echo "#"
+        echo "#  [ $NEW_KEYS_DIR ]"
+        echo "#"
         echo "###################################################"
 
         echo "#--------------------------------------------------"
         echo "# Checking grubx64.efi"
         echo "#--------------------------------------------------"
-        fxnEC fxnVerifyFileSigning  "${BUILD_DIR}/${ONIE_MACHINE}/grubx64.efi" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning  "${BUILD_DIR}/${ONIE_MACHINE}/grubx64.efi"  $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] in ${BUILD_DIR}/${ONIE_MACHINE} \n"  "$errorLog" 'GRUB'
 
         echo "#--------------------------------------------------"
         echo "# Checking vmlinuz.efi"
         echo "#--------------------------------------------------"
-        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/images/${ONIE_MACHINE}.vmlinuz" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/images/${ONIE_MACHINE}.vmlinuz" $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] as vmlinuz in ${BUILD_DIR}/images/${ONIE_MACHINE}.vmlinuz\n" "$errorLog" 'kernel'
 
         echo "#--------------------------------------------------"
         echo "# Checking shimx64.efi"
@@ -209,11 +213,8 @@ function fxnVerifySigned() {
 
         # Shim gets signed with SHIM_SELF_SIGN_SECRET_KEY
         # verify with  SW-database-key-cert.pem
-		#        fxnEC fxnVerifyFileSigning "${SAFE_PLACE}/shimx64.efi"  $verbose  || exit 1
-#		if [ ! -e "${BUILD_DIR}/${ONIE_MACHINE}/shim/install/shimx64.efi.signed" ];then
-#			echo "Failed to find shimx64.efi.signed. Run make shim-self-sign? Exiting."
-#		fi
-        fxnEC fxnVerifyFileSigning "${SAFE_PLACE}/shimx64.efi.signed"  $verbose  || exit 1		
+        fxnEC fxnVerifyFileSigning "${SAFE_PLACE}/shimx64.efi.signed"  $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] in $SAFE_PLACE \n" "$errorLog" 'signed shim'
         echo "^^^Ignore section table gap warning."
     else
         echo "Failed to find keys to reference at [ $NEW_KEYS_DIR ]"
@@ -228,53 +229,64 @@ function fxnVerifySigned() {
         echo "#--------------------------------------------------"
         echo "#  Build area grubx64.efi"
         echo "#--------------------------------------------------"
-        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/grubx64.efi" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/grubx64.efi" $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] in build area - ${ONIE_MACHINE}/recovery/EFI/BOOT/ \n" "$errorLog" 'GRUB'
 
         # This is the renamed, signed shim
         echo "#--------------------------------------------------"
         echo "#  Build area shimx64.efi, renamed to bootx64.efi"
         echo "#--------------------------------------------------"
-        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/bootx64.efi" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/EFI/BOOT/bootx64.efi" $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] as bootx64.efi in boot area ${ONIE_MACHINE}/recovery/EFI/BOOT/bootx64.efi. \n" "$errorLog" 'shim'
 
 
-        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/shim/install/shimx64.efi" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/shim/install/shimx64.efi" $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] in ${ONIE_MACHINE}/shim/install/shimx64.efi \n" "$errorLog" 'shmimx64.efi'
         # kernel
         echo "#--------------------------------------------------"
         echo "#  Build area vmlinuz.efi"
         echo "#--------------------------------------------------"
-        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz" $verbose || exit 1
+        fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz" $verbose \
+            || printf -v errorLog "%s Failed to verify [ %-15s ] in iso-sysroot ${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz\n" "$errorLog" 'kernel'
     fi
 
 
     echo "#--------------------------------------------------"
     echo "#  UEFI BIOS keys"
     echo "#--------------------------------------------------"
-	echo ""
+    echo ""
     echo "# are in ${EFI_VARS_DIR}"
-	ls -l ${EFI_VARS_DIR}
+    ls -l ${EFI_VARS_DIR}
 
-	USB_DATA_DIR="../emulation/emulation-files/usb/usb-data/"
-	if [ -e "$USB_DATA_DIR" ];then
-		echo " Emulation directories exist. Checking UEFI variable staging..."
-		if [ -e "${USB_DATA_DIR}/keys/efiVars/" ];then
-			diff -q "${USB_DATA_DIR}/keys/efiVars/db-all.auth" "${EFI_VARS_DIR}/db-all.auth"
-			if [ $? = 0 ];then
-				echo "  db-all.auth  in virtual USB drive matches the one in $EFI_VARS_DIR"
-			else
-				echo "  db-all.auth  in virtual USB drive does NOT match the one in $EFI_VARS_DIR"				
-			fi
-			diff -q "${USB_DATA_DIR}/keys/efiVars/kek-all.auth" "${EFI_VARS_DIR}/kek-all.auth"
-			if [ $? = 0 ];then
-				echo "  kek-all.auth in virtual USB drive matches the one in $EFI_VARS_DIR"
-			else
-				echo "  kek-all.auth in virtual USB drive does NOT match the one in $EFI_VARS_DIR"				
-			fi
-		fi
-		echo ""
-	else
-		echo "No efi varaibles have been copied to the virtual USB drive."
-	fi
+    USB_DATA_DIR="../emulation/emulation-files/usb/usb-data/"
+    if [ -e "$USB_DATA_DIR" ];then
+        echo " Emulation directories exist. Checking UEFI variable staging..."
+        if [ -e "${USB_DATA_DIR}/keys/efiVars/" ];then
+            diff -q "${USB_DATA_DIR}/keys/efiVars/db-all.auth" "${EFI_VARS_DIR}/db-all.auth"
+            if [ $? = 0 ];then
+                echo "  db-all.auth  in virtual USB drive matches the one in $EFI_VARS_DIR"
+            else
+                echo "  db-all.auth  in virtual USB drive does NOT match the one in $EFI_VARS_DIR"
+            fi
+            diff -q "${USB_DATA_DIR}/keys/efiVars/kek-all.auth" "${EFI_VARS_DIR}/kek-all.auth"
+            if [ $? = 0 ];then
+                echo "  kek-all.auth in virtual USB drive matches the one in $EFI_VARS_DIR"
+            else
+                echo "  kek-all.auth in virtual USB drive does NOT match the one in $EFI_VARS_DIR"
+            fi
+        fi
+        echo ""
+    else
+        echo "No efi varaibles have been copied to the virtual USB drive."
+    fi
 
+    echo ""
+    if [ "$errorLog" = "" ];then
+        errorLog="Components are signed."
+    fi
+
+    printf "Signed file audit status: \n%s" "$errorLog"
+    echo ""
     #fxnEC fxnVerifyFileSigning "${BUILD_DIR}/user/x86_64-g8.3.0-lnx5.4.86-uClibc-ng-1.0.35/dev-sysroot/usr/share/shim/shimx64.efi"
 
     #       fxnEC fxnVerifyFileSigning "${BUILD_DIR}/${ONIE_MACHINE}/recovery/iso-sysroot/vmlinuz" $verbose |user/x86_64-g8.3.0-lnx5.4.86-uClibc-ng-1.0.35/dev-sysroot" \
@@ -758,7 +770,7 @@ function fxnPopulateUSBTransfer()
 function fxnBuildSecure()
 {
     local theTarget="$1"
-	set -x
+    set -x
     if [ ! -e "$NEW_KEYS_DIR" ];then
         echo ""
         echo "ERROR! A secure build requires keys under [ $NEW_KEYS_DIR ]. "
@@ -768,7 +780,7 @@ function fxnBuildSecure()
     fi
 
     if [ "$theTarget" != "" ];then
-		cd ../build-config
+        cd ../build-config
         echo ""
         echo "#####################################################"
         echo "#"
@@ -778,9 +790,9 @@ function fxnBuildSecure()
         fxnEC make V=1 -j8 $DOWNLOAD_CACHE $ALL_SIGNING_KEYS ${MACHINEROOT_DIR}  ${MACHINE_BUILD_TARGET} "$theTarget" || exit 1
         exit 0
     fi
-	echo "BAILING"
-exit 1
-    fxnGenerateKEKAndDBEFIVars	
+    echo "BAILING"
+    exit 1
+    fxnGenerateKEKAndDBEFIVars
     #
     # build the shim
     #
@@ -790,13 +802,13 @@ exit 1
     #
     # build ONIE
     #
-	cd ../build-config
+    cd ../build-config
     fxnPS "Secure: Building signed ONIE: make $DOWNLOAD_CACHE -j8 $ALL_SIGNING_KEYS ${MACHINEROOT_DIR}  ${MACHINE_BUILD_TARGET} all demo recovery-iso SHIM_PREBUILT_DIR=${SAFE_PLACE}"
 
     echo "    time make $DOWNLOAD_CACHE  $ALL_SIGNING_KEYS ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} V=1 \
          -j8 all demo recovery-iso SHIM_PREBUILT_DIR=${SAFE_PLACE}"
 
-	pwd
+    pwd
     # clear out old images - new one is being assembled
     make $DOWNLOAD_CACHE  $ALL_SIGNING_KEYS ${MACHINEROOT_DIR} ${MACHINE_BUILD_TARGET} V=1  image-clean
 
@@ -1132,10 +1144,10 @@ function fxnGenerateKEKAndDBEFIVars()
     rm /tmp/db*.esl 2> /dev/null
     rm /tmp/kek.esl 2> /dev/null
 
-	# Software vendor KEK
+    # Software vendor KEK
     fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "${KP_KEK_SOFTWARE_CERT}"  /tmp/kek-sw.esl || exit 1
     # ./hw-vendor-KEK-cert.pem
-	# Hardware vendor KEK
+    # Hardware vendor KEK
     fxnEC cert-to-efi-sig-list -g $(cat /tmp/GUID.txt) "${KP_KEK_HARDWARE_CERT}"  /tmp/kek-hw.esl || exit 1
 
     fxnEC cat /tmp/kek-hw.esl /tmp/kek-sw.esl > /tmp/kek-all.esl || exit 1
@@ -1190,39 +1202,39 @@ function fxnGenerateKEKAndDBEFIVars()
 # Convert a key to be able to be added to the UEFI db
 function fxnAddUEFIDBKey()
 {
-	# This is a public key with a certificate in it.
-	# Could be .der or .pem
-	local certPassed="$1"
-	local outputName="new-uefi-db-key"
-	echo "#####################################################"
+    # This is a public key with a certificate in it.
+    # Could be .der or .pem
+    local certPassed="$1"
+    local outputName="new-uefi-db-key"
+    echo "#####################################################"
     echo "#                                                   #"
     echo "# Generating UEFI db key from [ $certPassed ]"
     echo "#                                                   #"
     echo "#####################################################"
 
-	if [ ! -e "$certPassed" ];then
-		echo "ERROR! Failed to find public key with certificate $certPassed. Exiting."
-		exit 1
-	fi
+    if [ ! -e "$certPassed" ];then
+        echo "ERROR! Failed to find public key with certificate $certPassed. Exiting."
+        exit 1
+    fi
 
     # Reference a passed in file, or generate a new one, that
     # details where every key to add should come from.
-	# we need this for the key exchange key that has to sign the
-	# passed in key.
+    # we need this for the key exchange key that has to sign the
+    # passed in key.
     fxnReadKeyConfigFile
 
-	# convert the certificate key to esl format
-	echo "Converting key format to .esl"
-	fxnEC cert-to-efi-sig-list $1 ./${outputName}.esl || exit 1
+    # convert the certificate key to esl format
+    echo "Converting key format to .esl"
+    fxnEC cert-to-efi-sig-list $1 ./${outputName}.esl || exit 1
 
-	echo "Signing ${outputName}.esl with $KP_PLATFORM_SECRET_KEY and $KP_PLATFORM_CERT" 
-	fxnEC sign-efi-sig-list -k "$KP_PLATFORM_SECRET_KEY"  \
-					  -c "$KP_PLATFORM_CERT" \
-					  db \
-					  ${outputName}.esl \
-					  ${outputName}.auth || exit 1
+    echo "Signing ${outputName}.esl with $KP_PLATFORM_SECRET_KEY and $KP_PLATFORM_CERT"
+    fxnEC sign-efi-sig-list -k "$KP_PLATFORM_SECRET_KEY"  \
+          -c "$KP_PLATFORM_CERT" \
+          db \
+          ${outputName}.esl \
+          ${outputName}.auth || exit 1
 
-	echo "Converted key is at $(realpath ./${outputName}.auth )"
+    echo "Converted key is at $(realpath ./${outputName}.auth )"
 }
 
 # Create full sets of keys for:
@@ -1308,13 +1320,13 @@ fxnReadKeyConfigFile()
         echo "ERROR! Failed to find key configuration file at [ $KEY_CONFIG_FILE ]"
         exit 1
     fi
-	echo""
-	echo "#####################################################"
-	echo "#"
-	echo "# Reading key paths from [ ${PWD}/$KEY_CONFIG_FILE ]"
-	echo "#"	
-    echo "#####################################################"	
-	echo ""
+    echo""
+    echo "#####################################################"
+    echo "#"
+    echo "# Reading key paths from [ ${PWD}/$KEY_CONFIG_FILE ]"
+    echo "#"
+    echo "#####################################################"
+    echo ""
     while IFS=, read -r name alignspace path emptySpace; do
         #echo "$name  $path"
         foundMatch="TRUE"
@@ -1342,19 +1354,19 @@ fxnReadKeyConfigFile()
             KP_MODULE_SIG_KEY_SRCPREFIX )
                 KP_MODULE_SIG_KEY_SRCPREFIX="$path"
                 ;;
-			
-#			KP_KERNEL_SIGNING_KEY_DIR )
-#				KP_KERNEL_SIGNING_KEY_DIR="$path"
-#				;;
+
+            #           KP_KERNEL_SIGNING_KEY_DIR )
+            #               KP_KERNEL_SIGNING_KEY_DIR="$path"
+            #               ;;
 
             KP_SHIM_EMBED_DER )
                 KP_SHIM_EMBED_DER="$path"
                 ;;
 
-			KP_SHIM_PREBUILT_DIR )
-				KP_SHIM_PREBUILT_DIR="$path"
-				;;
-			
+            KP_SHIM_PREBUILT_DIR )
+                KP_SHIM_PREBUILT_DIR="$path"
+                ;;
+
             KP_SHIM_SECRET_KEY )
                 KP_SHIM_SECRET_KEY="$path"
                 ;;
@@ -1362,7 +1374,7 @@ fxnReadKeyConfigFile()
             KP_SHIM_PUBLIC_CERT )
                 KP_SHIM_PUBLIC_CERT="$path"
                 ;;
-			
+
             KP_GRUB_SECRET_KEY )
                 KP_GRUB_SECRET_KEY="$path"
                 ;;
@@ -1419,21 +1431,21 @@ fxnReadKeyConfigFile()
                 KP_PLATFORM_SECRET_KEY="$path"
                 ;;
 
-			#
-			# GPG keys for Extended Secure Boot
-			KP_GPG_SIGN_PUBRING )
-				KP_GPG_SIGN_PUBRING="$path"
-				;;
+            #
+            # GPG keys for Extended Secure Boot
+            KP_GPG_SIGN_PUBRING )
+                KP_GPG_SIGN_PUBRING="$path"
+                ;;
 
-			KP_GPG_SIGN_SECRING )
-				KP_GPG_SIGN_SECRING="$path"
-				;;
+            KP_GPG_SIGN_SECRING )
+                KP_GPG_SIGN_SECRING="$path"
+                ;;
 
-			# Location of third party (or self) signed shim efi
-			KP_SHIM_PREBUILT_DIR )
-				KP_SHIM_PREBUILT_DIR="$path"
-				;;
-			
+            # Location of third party (or self) signed shim efi
+            KP_SHIM_PREBUILT_DIR )
+                KP_SHIM_PREBUILT_DIR="$path"
+                ;;
+
             * )
                 foundMatch="FALSE"
                 ;;
@@ -1445,8 +1457,8 @@ fxnReadKeyConfigFile()
             # is the path valid?
             if [ ! -e "$path" ];then
                 echo "ERROR! in [ $KEY_CONFIG_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
-				echo ""
-				exit 1
+                echo ""
+                exit 1
             fi
         fi
     done < "$KEY_CONFIG_FILE"
@@ -1468,28 +1480,28 @@ fxnReadKeyConfigFile()
         ONIE_VENDOR_CERT_PEM=${KP_ONIE_VENDOR_CERT_PEM} \
         SHIM_SELF_SIGN_SECRET_KEY_PEM=${KP_SHIM_SELF_SIGN_SECRET_KEY_PEM} \
         SHIM_SELF_SIGN_PUBLIC_CERT_PEM=${KP_SHIM_SELF_SIGN_PUBLIC_CERT_PEM} \
-		SHIM_PREBUILT_DIR=${KP_SHIM_PREBUILT_DIR} \
-		ONIE_MODULE_SIG_KEY_SRCPREFIX=${KP_MODULE_SIG_KEY_SRCPREFIX} \
-	"
+        SHIM_PREBUILT_DIR=${KP_SHIM_PREBUILT_DIR} \
+        ONIE_MODULE_SIG_KEY_SRCPREFIX=${KP_MODULE_SIG_KEY_SRCPREFIX} \
+    "
 
-	if [ ! -e "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/" ];then
-		mkdir -p "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/"
-	fi
+    if [ ! -e "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/" ];then
+        mkdir -p "${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/"
+    fi
 
-	keyPath="${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/signing-key-paths.make"
+    keyPath="${ONIE_TOP_DIR}/encryption/machines/${ONIE_MACHINE_TARGET}/signing-key-paths.make"
 
-	echo ""
-	echo " ----------------------------------------------------"
-	echo "|"
-	echo "| Generating Secure Boot makefile fragment at:"
-	echo "| $keyPath"
-	echo "|"
-	echo " ----------------------------------------------------"
-	echo ""
-	# Make sure no trailing spaces, else the path has a ' ' in it,
-	# making it unfindable and awful to debug
-	echo "
-# Generated by $0 on $(date) 
+    echo ""
+    echo " ----------------------------------------------------"
+    echo "|"
+    echo "| Generating Secure Boot makefile fragment at:"
+    echo "| $keyPath"
+    echo "|"
+    echo " ----------------------------------------------------"
+    echo ""
+    # Make sure no trailing spaces, else the path has a ' ' in it,
+    # making it unfindable and awful to debug
+    echo "
+# Generated by $0 on $(date)
 # Key path makefile fragment for $ONIE_MACHINE_TARGET
 ONIE_VENDOR_SECRET_KEY_PEM     = ${KP_ONIE_VENDOR_SECRET_KEY_PEM}
 ONIE_VENDOR_CERT_DER           = ${KP_ONIE_VENDOR_CERT_DER}
@@ -1507,27 +1519,27 @@ GPG_SIGN_SECRING               = ${KP_GPG_SIGN_SECRING}
 
 " > "${keyPath}"
 
-	if [ ! -d "${KEY_UTILITIES_DIR}" ];then
-		mkdir -p "${KEY_UTILITIES_DIR}"
-	fi
-	if [ ! -d "${KEY_EFI_BINARIES_DIR}" ];then
-		mkdir -p "${KEY_EFI_BINARIES_DIR}"
-	fi
-	
+    if [ ! -d "${KEY_UTILITIES_DIR}" ];then
+        mkdir -p "${KEY_UTILITIES_DIR}"
+    fi
+    if [ ! -d "${KEY_EFI_BINARIES_DIR}" ];then
+        mkdir -p "${KEY_EFI_BINARIES_DIR}"
+    fi
+
     # efi tools were placed by a 'make install' at container creation time
     cp /usr/share/efitools/efi/*.efi "${KEY_EFI_BINARIES_DIR}/" || exit 1
     cp /usr/bin/*efi*                "${KEY_EFI_BINARIES_DIR}/" || exit 1
-    cp /usr/bin/sb*                  "${KEY_UTILITIES_DIR}/"    || exit 1	
+    cp /usr/bin/sb*                  "${KEY_UTILITIES_DIR}/"    || exit 1
     cp /usr/bin/sig-list-to-certs    "${KEY_UTILITIES_DIR}/"    || exit 1
     cp /usr/bin/flash-var            "${KEY_UTILITIES_DIR}/"    || exit 1
     fxnPS "Secure: USB-DRIVE efi binaries:"
     ls -l ${KEY_EFI_BINARIES_DIR}
     fxnPS "Secure: USB-DRIVE efi utilities:"
     ls -l ${USB_XFER_EFI_UTILITIES_DIR}
-	
-	fxnWriteUEFIUpdateKeys
-#		KERNEL_SIGNING_KEY_DIR=${KP_KERNEL_SIGNING_KEY_DIR} 	
-#         MODULE_SIG_KEY=${KP_MODULE_SIG_KEY} 
+
+    fxnWriteUEFIUpdateKeys
+    #       KERNEL_SIGNING_KEY_DIR=${KP_KERNEL_SIGNING_KEY_DIR}
+    #         MODULE_SIG_KEY=${KP_MODULE_SIG_KEY}
 
 }
 
@@ -1537,14 +1549,14 @@ GPG_SIGN_SECRING               = ${KP_GPG_SIGN_SECRING}
 function fxnGenerateCSVKeyFile()
 {
     local fileName="$2"
-	
+
     #
     # Here, ONIE signed components would be the same as a Linux NOS
     #
     local ONIEVendorSecretKeyPEM="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-secret-key.pem"
     local ONIEVendorCertDER="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-cert.der"
     local ONIEVendorCertPEM="${CRYPTO_DIR}/keys/ONIE/efi-keys/ONIE-shim-key-cert.pem"
-    local ONIEVendorKeyDir="${CRYPTO_DIR}/keys/ONIE/efi-keys"	
+    local ONIEVendorKeyDir="${CRYPTO_DIR}/keys/ONIE/efi-keys"
 
     #
     # This represents the 'third party signer' - like Microsoft
@@ -1552,10 +1564,10 @@ function fxnGenerateCSVKeyFile()
     local ThirdPartyPublicKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-database-key-cert.pem"
     local ThirdPartyKeyExchangeKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-key-exchange-key-cert.pem"
 
-    if [ "$fileName" = "" ];then		
+    if [ "$fileName" = "" ];then
         fileName="$DEFAULT_KEY_CONFIG_FILE"
     fi
-	# create a default file if none was specified, or return if this already happened.
+    # create a default file if none was specified, or return if this already happened.
     if [ -e "$fileName" ];then
         echo "Not generating a CSV key file because [ $fileName ] already exists. Try a different name for a new file."
         return 0
@@ -1651,10 +1663,10 @@ KP_SHIM_PREBUILT_DIR,   ,${CRYPTO_DIR}/safe-place,
 
 EOF
 
-	# The extended secure boot options (signed grub, etc) may not be
-	# part of the build unless the user has enabled them.
-	if [ "$ONIE_SECURE_BOOT_EXTENDED" = "TRUE" ];then
-    cat <<EOF >  ${fileName}
+    # The extended secure boot options (signed grub, etc) may not be
+    # part of the build unless the user has enabled them.
+    if [ "$ONIE_SECURE_BOOT_EXTENDED" = "TRUE" ];then
+        cat <<EOF >  ${fileName}
 
 # Secure Boot: extended
 # GPG Keys - used for signing kernel and grub in Extended Secure Boot
@@ -1662,7 +1674,7 @@ KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
 KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
 
 EOF
-	fi
+    fi
 
     echo ""
     echo "Created: [ $fileName ]"
