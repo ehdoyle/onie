@@ -1,5 +1,7 @@
 # KVM x86_64 Virtual Machine custom installer file
+# These files will add to/override existing installer functions
 
+# Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
 # Copyright (C) 2016 Curt Brune <curt@cumulusnetworks.com>
 
 test_install_sharing()
@@ -7,6 +9,17 @@ test_install_sharing()
     # Default message
     echo "ERROR: test_install_sharing include mechanism failed"
     exit 1
+}
+
+
+set_default_passwd()
+{
+    # Set default user password to 'onie' for kvm_x86_64
+    echo "Set default password to $onie_root_dir/config/etc/passwd"
+    mkdir -p $onie_root_dir/config/etc
+    cat<< EOF > "$onie_root_dir/config/etc/passwd"
+root:lLaehaKdHCGzc:0:0:root:/root:/bin/sh
+EOF
 }
 
 # Test of the installer file sharing mechanism

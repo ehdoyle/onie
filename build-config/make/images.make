@@ -282,6 +282,15 @@ $(SYSROOT_COMPLETE_STAMP): $(SYSROOT_CHECK_STAMP)
 		cp -ar $(MACHINEDIR)/rootconf/sysroot-etc/* $(SYSROOTDIR)/etc/ ; \
 		cp -ar $(MACHINEDIR)/rootconf/sysroot-etc/* $(SYSROOTDIR)/etc/ ; \
 	     fi
+ifeq ($(SECURE_BOOT_EXT),yes)
+	# Run login to support an ONIE password
+    # The ONIE password is stored under /mnt/onie-boot
+	$(Q) if [ -r $(SYSROOTDIR)/etc/passwd ]; then rm $(SYSROOTDIR)/etc/passwd; fi
+	# Have dropbear init script reference the passwd file under /mnt/onie-boot
+	$(Q) sed -i '/log_begin_msg "Starting:*/a \        # Use passwd file under /mnt/onie-boot \n        rm  -f /etc/passwd && ln -s /mnt/onie-boot/onie/config/etc/passwd /etc/passwd' $(SYSROOTDIR)/etc/init.d/dropbear.sh
+	# Run login rather than sh
+	$(Q) sed -i 's/exec \/bin\/sh -l/exec \/bin\/login/' $(SYSROOTDIR)/bin/onie-console
+endif
 	$(Q) cd $(SYSROOTDIR) && ln -fs sbin/init ./init
 	$(Q) rm -f $(LSB_RELEASE_FILE)
 	$(Q) echo "DISTRIB_ID=onie" >> $(LSB_RELEASE_FILE)

@@ -153,6 +153,21 @@ update_syseeprom()
     fi
 }
 
+set_default_passwd()
+{
+    # If secure boot extended is enabled, there is an option
+	# to set default password.
+    # This function is a template, and it is expected that the
+	# machine's install-platform file will have an instance of
+	# this function to override it.
+	#  The template defaults to setting an empty password.
+    mkdir -p $onie_root_dir/config/etc
+    cat<< EOF > "$onie_root_dir/config/etc/passwd"
+root::0:0:root:/root:/bin/sh
+EOF
+
+}
+
 [ -r ./install-platform ] && . ./install-platform
 
 fail=

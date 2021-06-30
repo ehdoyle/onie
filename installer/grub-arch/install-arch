@@ -1,5 +1,6 @@
 # x86_64 specific ONIE installer functions
 
+#  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
 #  Copyright (C) 2021 Andriy Dobush <andriyd@nvidia.com>
 #  Copyright (C) 2014,2015,2016,2018 Curt Brune <curt@cumulusnetworks.com>
 #  Copyright (C) 2014,2015,2016 david_yang <david_yang@accton.com>
@@ -929,6 +930,14 @@ install_image()
 
     # update sys_eeprom
     update_syseeprom
+	
+    # Set root account password, if Secure Boot Extended is active
+	# This is overridden by
+	#  onie/machine/<manufactuer>/<machine>/installer/install-platform
+	#  See that file for password details.
+    if [ "$image_secure_boot_ext" = "yes" ] ; then
+        set_default_passwd
+    fi
 
 }
 
