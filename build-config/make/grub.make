@@ -1,6 +1,6 @@
 #-------------------------------------------------------------------------------
 #
-#  Copyright (C) 2020 Alex Doyle <adoyle@nvidia.com>
+#  Copyright (C) 2020,2021 Alex Doyle <adoyle@nvidia.com>
 #  Copyright (C) 2014,2015,2017 Curt Brune <curt@cumulusnetworks.com>
 #  Copyright (C) 2015,2017 david_yang <david_yang@accton.com>
 #  Copyright (C) 2016 Pankaj Bansal <pankajbansal3073@gmail.com>
@@ -380,6 +380,7 @@ $(GRUB_INSTALL_SB_STAMP): $(SBSIGNTOOL_INSTALL_STAMP) $(GRUB_INSTALL_STAMP) $(GR
 	$(Q) sbsign --key $(ONIE_VENDOR_SECRET_KEY_PEM) \
 		--cert $(ONIE_VENDOR_CERT_PEM) \
 		--output $(GRUB_SECURE_BOOT_IMAGE) $(GRUB_MONOLITH_IMAGE)
+	$(Q) echo "== Signed output grub from $(GRUB_MONOLITH_IMAGE) is at $(GRUB_SECURE_BOOT_IMAGE)"
 	$(Q) touch $@
 
 #-------------------------------------------------------------------------------

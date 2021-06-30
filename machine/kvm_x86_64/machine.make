@@ -1,5 +1,6 @@
 # KVM x86_64 Virtual Machine
 
+#  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
 #  Copyright (C) 2014,2016,2017,2018 Curt Brune <curt@cumulusnetworks.com>
 #  Copyright (C) 2014 david_yang <david_yang@accton.com>
 #  Copyright (C) 2014 Stephen Su <sustephen@juniper.net>
@@ -60,47 +61,8 @@ SKIP_ETHMGMT_MACS = yes
 SECURE_BOOT_ENABLE = yes
 
 # Enable extended secure boot:
-#  Grub that verifies binaries and has a password
-#SECURE_BOOT_EXT = yes
-
-# ONIE_VENDOR_SECRET_KEY_PEM -- file system path to private RSA key
-# encoded in PEM format.
-#
-# WARNING: This key is extremely sensitive and should be handled
-# carefully.  In practice, this key should never be checked into the
-# code repository.  Set ONIE_VENDOR_SECRET_KEY_PEM on the make command
-# line at build time.
-#
-# In this example, the machine is a demonstration vehicle and the
-# secret key is not sensitive.  It is reasonable for this key to
-# reside in the upstream code repository.
-#A-ONIE_VENDOR_SECRET_KEY_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-secret-key.pem
-
-# ONIE_VENDOR_CERT_DER -- file system path to public vendor x509
-# certificate, encoded in DER format.
-#
-# Typically this variable is specified on the command line as we do
-# not expect the certificate to reside in the upstream code
-# repository.  Included here as this machine is a demonstration
-# vehicle.
-#A-ONIE_VENDOR_CERT_DER = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.der
-
-# ONIE_VENDOR_CERT_PEM -- file system path to public vendor x509
-# certificate, encoded in PEM format.  Same as ONIE_VENDOR_CERT_DER,
-# but in PEM format.
-# This is also used in the machine kernel config.
-#A-ONIE_VENDOR_CERT_PEM = $(MACHINEDIR)/x509/onie-vendor-SHIM-cert.pem
-
-# SHIM_SELF_SIGN_SECRET_KEY_PEM
-# SHIM_SELF_SIGN_PUBLIC_CERT_PEM
-#
-# These two parameters are for testing purposes only.  They allow one
-# to simulate having shimx64.efi signed by a recognized signing
-# authority.  The certificate used here must be loaded into the DB on
-# the target system in order to verify the signature.
-#A-SHIM_SELF_SIGN_SECRET_KEY_PEM  = $(MACHINEDIR)/x509/sw-vendor-DB-secret-key.pem
-#A-SHIM_SELF_SIGN_PUBLIC_CERT_PEM = $(MACHINEDIR)/x509/sw-vendor-DB-cert.pem
-
+#  Signed initrd, grub configs, passwords, etc...
+SECURE_BOOT_EXT = yes
 
 # Console parameters can be defined here (default values are in
 # build-config/arch/x86_64.make).
@@ -131,13 +93,21 @@ ENCRYPTIONDIR    = $(realpath ../encryption)
 # A 'safe place' to store data, like a signed shim...'
 SAFE_PLACE       = $(ENCRYPTIONDIR)/safe-place
 
+# Secure boot extended requires secure boot to be active.
+# This will enable onie/grub passwords, detached signatures, etc
+ifeq ($(SECURE_BOOT_EXT),yes)
+	SECURE_BOOT_ENABLE = yes
+endif
+
 # For secure boot - include machine specific generated makefile fragment
 # which references signing keys. This will be created the first time keys
 # are generated for the platform using the encryption-tool.sh
 # and can be modified as needed.
-
-KEY_PATHS_MAKEFILE = $(ENCRYPTIONDIR)/machines/kvm_x86_64/signing-key-paths.make
-include $(KEY_PATHS_MAKEFILE)
+# Don't allow the lack of this file to break running a 'clean'
+ifeq ($(SECURE_BOOT_ENABLE),yes)
+	KEY_PATHS_MAKEFILE = $(ENCRYPTIONDIR)/machines/kvm_x86_64/signing-key-paths.make
+	include $(KEY_PATHS_MAKEFILE)
+endif
 
 
 #-------------------------------------------------------------------------------

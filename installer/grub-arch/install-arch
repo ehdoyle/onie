@@ -1,5 +1,6 @@
 # x86_64 specific ONIE installer functions
 
+#  Copyright (C) 2021 Andriy Dobush <andriyd@nvidia.com>
 #  Copyright (C) 2014,2015,2016,2018 Curt Brune <curt@cumulusnetworks.com>
 #  Copyright (C) 2014,2015,2016 david_yang <david_yang@accton.com>
 #  Copyright (C) 2014 Stephen Su <sustephen@juniper.net>
@@ -545,8 +546,26 @@ install_grub_config()
     if [ -r $boot_dir/onie/grub/grub-variables ] ; then
         . $boot_dir/onie/grub/grub-variables
     fi
-
-    $boot_dir/onie/grub.d/50_onie_grub >> $grub_root_dir/grub.cfg
+    if [ "$image_secure_boot_ext" = "yes" ] ; then
+        /bin/cp grub_sb.cfg $grub_root_dir/grub.cfg || {
+            echo "ERROR: copying grub config to destatition: $grub_root_dir"
+            exit 1
+        }
+        /bin/cp grub_sb.cfg.sig $grub_root_dir/grub.cfg.sig || {
+            echo "ERROR: copying grub config  sig to destatition: $grub_root_dir"
+            exit 1
+        }
+        /bin/cp grub.cfg /boot/efi/EFI/onie/grub.cfg || {
+            echo "ERROR: copying grub config to destatition: /boot/efi/EFI/onie"
+            exit 1
+        }
+        /bin/cp grub.cfg.sig /boot/efi/EFI/onie/grub.cfg.sig || {
+            echo "ERROR: copying grub config to destatition: /boot/efi/EFI/onie"
+            exit 1
+        }
+    else
+        $boot_dir/onie/grub.d/50_onie_grub >> $grub_root_dir/grub.cfg
+    fi
 }
 
 # Legacy BIOS GRUB install function.
@@ -683,13 +702,16 @@ install_uefi_shim_grub()
         echo "ERROR: Unable to determine UUID of GRUB boot directory: $boot_dir"
         return 1
     }
-
-    # Generate tiny grub config for monolithic image
-    cat<< EOF > "${loader_dir}/grub.cfg"
+    # Run this only if secure boot is enabled but secure_boot_extended is disabled
+    #
+    if [ "$image_secure_boot" = "yes" ] && [ -z $image_secure_boot_ext ]; then
+        # Generate tiny grub config for monolithic image
+        cat<< EOF > "${loader_dir}/grub.cfg"
 search.fs_uuid $onie_boot_uuid root hd0,gpt$onie_boot_part
 set prefix=(\$root)'/grub'
 configfile \$prefix/grub.cfg
 EOF
+    fi
 
     # Install primary grub config in $onie_boot_part
     grub_dir="${boot_dir}/grub"
@@ -735,6 +757,20 @@ install_uefi_loader()
     
     install_grub_config $boot_dir
 
+    # Create default EFI loader BOOT/BOOTX64.efi
+    if [ "$image_secure_boot" = "yes" ] ; then
+        local loader_dir="${uefi_dir}/EFI/onie"
+        local BOOT_dir="${uefi_dir}/EFI/BOOT"
+        mkdir -p $BOOT_dir
+        cp -f $loader_dir/* ${BOOT_dir}/ || {
+            echo "ERROR: Unable to copy loader directory: $loader_dir to ${BOOT_dir}"
+            return 1
+        }
+        if [ -f ${BOOT_dir}/mmx64.efi ] ; then
+            rm -f ${BOOT_dir}/mmx64.efi
+        fi
+        mv "${BOOT_dir}/shimx64.efi" "${BOOT_dir}/BOOTX64.EFI"
+    fi
 }
 
 # This function is run by install.sh *after* the onie-update.tar file
@@ -811,7 +847,9 @@ install_image()
 
     # Put the ONIE kernel and initramfs into place.
     kernel_name="vmlinuz-${image_kernel_version}-onie"
+    kernel_signature="${kernel_name}.sig"
     initrd_name="initrd.img-${image_kernel_version}-onie"
+    initrd_signature="${initrd_name}.sig"
     cp onie.vmlinuz $onie_root_dir/$kernel_name || {
         echo "Error: Unable to copy ONIE kernel to $onie_root_dir/$kernel_name"
         exit 1
@@ -820,6 +858,17 @@ install_image()
         echo "Error: Unable to copy ONIE initrd to $onie_root_dir/$initrd_name"
         exit 1
     }
+    if [ "$image_secure_boot_ext" = "yes" ] ; then
+        cp onie.vmlinuz.sig $onie_root_dir/$kernel_signature || {
+            echo "ERROR: problems installing kernel signature on: $boot_dev"
+            exit 1
+        }
+        cp onie.initrd.sig $onie_root_dir/$initrd_signature || {
+            ls -la
+            echo "ERROR: problems installing kernel signature on: $boot_dev"
+            exit 1
+        }
+    fi
     # install ONIE tools
     rm -rf $onie_root_dir/tools && mkdir -p $onie_root_dir/tools
     tar -C $onie_root_dir/tools -xf onie-tools.tar.xz || {

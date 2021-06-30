@@ -1478,6 +1478,15 @@ KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
 EOF
     fi
 
+	# Add this to put editors into makefile mode.
+    cat <<EOF >>  ${fileName}	
+#-------------------------------------------------------------------------------
+#
+# Local Variables:
+# mode: makefile-gmake
+# End:
+	
+EOF
     echo ""
     echo "Created: [ $fileName ]"
     echo ""
