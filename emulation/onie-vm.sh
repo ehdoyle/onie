@@ -74,7 +74,7 @@ USB_MNT_DIR="${USB_DIR}/usb-mount"
 HARD_DRIVE=${EMULATION_DIR}/onie-${ONIE_MACHINE_TARGET}-demo.qcow2
 
 # Size in GB of virtual drive
-HARD_DRIVE_SIZE=5
+HARD_DRIVE_SIZE=2G
 
 # Formatting takes a while, so once that is done, keep a copy
 # of the empty formatted drive so that clean installs
@@ -303,7 +303,7 @@ function fxnCreateHardDrive ()
 {
     if [ ! -e "$HARD_DRIVE" ];then
         fxnPS "Creating qcow2 image $HARD_DRIVE to use as 'hard drive'"
-        qemu-img create -f qcow2 -o preallocation=full  "$HARD_DRIVE" "${HARD_DRIVE_SIZE}G" || exit 1
+        qemu-img create -f qcow2 -o preallocation=full  "$HARD_DRIVE" "${HARD_DRIVE_SIZE}" || exit 1
         if [ -e "$CLEAN_HARD_DRIVE" ];then
             rm "$CLEAN_HARD_DRIVE"
         fi
