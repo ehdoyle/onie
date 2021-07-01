@@ -62,7 +62,10 @@ SECURE_BOOT_ENABLE = yes
 
 # Enable extended secure boot:
 #  Signed initrd, grub configs, passwords, etc...
-SECURE_BOOT_EXT = yes
+SECURE_BOOT_EXT = no
+
+# Grub validates files, uses a password if yes
+SECURE_GRUB = no
 
 # Console parameters can be defined here (default values are in
 # build-config/arch/x86_64.make).

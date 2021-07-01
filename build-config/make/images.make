@@ -118,7 +118,7 @@ ifeq ($(KEYUTILS_ENABLE),yes)
   PACKAGES_INSTALL_STAMPS += $(KEYUTILS_INSTALL_STAMP)
 endif
 
-ifeq ($(SECURE_BOOT_EXT),no)
+ifeq ($(SECURE_GRUB),no)
   GPG_SIGN_SECRING = ''
 endif
 
@@ -322,6 +322,9 @@ endif
 ifeq ($(SECURE_BOOT_EXT),yes)
 	$(Q) echo "onie_secure_boot_ext=$(SECURE_BOOT_EXT)" >> $(MACHINE_CONF)
 endif
+ifeq ($(SECURE_GRUB),yes)
+	$(Q) echo "onie_secure_grub=$(SECURE_GRUB)" >> $(MACHINE_CONF)
+endif
 ifeq ($(SECURE_BOOT_ENABLE),yes)
 	$(Q) echo "onie_secure_boot=$(SECURE_BOOT_ENABLE)" >> $(MACHINE_CONF)
 endif
@@ -335,14 +338,15 @@ $(SYSROOT_CPIO_XZ) : $(SYSROOT_COMPLETE_STAMP)
 	$(Q) echo "==== Create xz compressed sysroot for bootstrap ===="
 	$(Q) fakeroot -- $(SCRIPTDIR)/make-sysroot.sh $(SYSROOTDIR) $(SYSROOT_CPIO)
 	$(Q) xz --compress --force --check=crc32 --stdout -8 $(SYSROOT_CPIO) > $@
-ifeq ($(SECURE_BOOT_EXT),yes)
+ifeq ($(SECURE_GRUB),yes)
+	# Create a detached signature so that grub can verify it
 	$(Q) echo "==== GPG sign file $(SYSROOT_CPIO_XZ) ===="
 	$(Q) fakeroot -- $(SCRIPTDIR)/gpg-sign.sh $(GPG_SIGN_SECRING) $(SYSROOT_CPIO_XZ)
 endif
 
 $(UPDATER_INITRD) : $(SYSROOT_CPIO_XZ)
 	ln -sf $< $@
-ifeq ($(SECURE_BOOT_EXT),yes)
+ifeq ($(SECURE_GRUB),yes)
 	ln -sf $(SYSROOT_CPIO_XZ_SIG) $(UPDATER_INITRD_SIG)
 endif
 

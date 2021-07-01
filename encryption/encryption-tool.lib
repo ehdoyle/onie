@@ -285,10 +285,29 @@ function fxnVerifySigned() {
         errorLog="  Components are signed."
     fi
 
+	# Grub
+	echo "#--------------------------------------------------"
+	echo "#  Detached signatures"
+    echo "#--------------------------------------------------"
+
+	
+	imageDir="${BUILD_DIR}/images"
+	fxnCheckFileExists "${imageDir}/${ONIE_MACHINE}.initrd.sig"
+	fxnCheckFileExists "${imageDir}/${ONIE_MACHINE}.vmlinuz.sig"
+	gpg -v --no-default-keyring --keyring /home/adoyle/onie/encryption/keys/ONIE/gpg-keys/ONIE-pubring.kbx --verify kvm_x86_64-r0.vmlinuz.sig kvm_x86_64-r0.vmlinuz
+
     printf "Signed file audit status: \n%s" "$errorLog"
     echo ""
 }
 
+function fxnCheckFileExists()
+{
+	if [ -e "$1" ];then
+		echo "File [ $1 ] exists"
+	else
+		echo "File [ $1 ] does not exist."
+	fi
+}
 
 #
 # be clear about secure boot configuration
@@ -1101,7 +1120,7 @@ KP_PLATFORM_SECRET_KEY=""
 fxnReadKeyConfigFile()
 {
     local foundMatch="FALSE"
-
+	local validatePath="TRUE"
 
     # If no key file name was supplied
     if [ "$KEY_CONFIG_FILE" = "" ];then
@@ -1223,6 +1242,12 @@ fxnReadKeyConfigFile()
             KP_PLATFORM_SECRET_KEY )
                 KP_PLATFORM_SECRET_KEY="$path"
                 ;;
+			
+            # Location of third party (or self) signed shim efi
+            KP_SHIM_PREBUILT_DIR )
+                KP_SHIM_PREBUILT_DIR="$path"
+                ;;
+			
 
             #
             # GPG keys for Extended Secure Boot
@@ -1234,10 +1259,23 @@ fxnReadKeyConfigFile()
                 KP_GPG_SIGN_SECRING="$path"
                 ;;
 
-            # Location of third party (or self) signed shim efi
-            KP_SHIM_PREBUILT_DIR )
-                KP_SHIM_PREBUILT_DIR="$path"
-                ;;
+			KP_GRUB_USER )
+				KP_GRUB_USER="$path"
+				# This is a value, not a path
+				validatePath="FALSE"
+				;;
+			
+			KP_GRUB_PASSWD_PLAINTEXT )
+				KP_GRUB_PASSWD_PLAINTEXT="$path"
+				# This is a value, not a path
+				validatePath="FALSE"
+				;;
+
+			KP_GRUB_PASSWD_HASH )
+				KP_GRUB_PASSWD_HASH="$path"
+				# This is a value, not a path
+				validatePath="FALSE"				
+				;;
 
             * )
                 foundMatch="FALSE"
@@ -1247,13 +1285,17 @@ fxnReadKeyConfigFile()
 
         if [ "$foundMatch" = "TRUE" ];then
             # matched an expected term, so didn't parse a comment.
-            # is the path valid?
-            if [ ! -e "$path" ];then
-                echo "ERROR! in [ $KEY_CONFIG_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
-                echo ""
-                exit 1
-            fi
+			if [ "$validatePath" = "TRUE" ];then
+				# is the path valid?
+				if [ ! -e "$path" ];then
+					echo "ERROR! in [ $KEY_CONFIG_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
+					echo ""
+					exit 1
+				fi
+			fi
         fi
+		# Default to checking paths
+		validatePath="TRUE"		
     done < "$KEY_CONFIG_FILE"
 
 }
@@ -1318,6 +1360,9 @@ ONIE_MODULE_SIG_KEY_SRCPREFIX  = ${KP_MODULE_SIG_KEY_SRCPREFIX}
 # GPG keys for signing kernel, grub in Extended Secure Boot
 GPG_SIGN_PUBRING               = ${KP_GPG_SIGN_PUBRING}
 GPG_SIGN_SECRING               = ${KP_GPG_SIGN_SECRING}
+GRUB_USER                      = ${KP_GRUB_USER}
+GRUB_PASSWD_PLAINTEXT          = ${KP_GRUB_PASSWD_PLAINTEXT}
+GRUB_PASSWD_HASH               = ${KP_GRUB_PASSWD_HASH}
 
 " > "${keyPath}"
 
@@ -1475,18 +1520,23 @@ EOF
 KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
 KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
 
+# Grub
+KP_GRUB_USER,             ,onie,
+# Two ways of setting GRUB password
+KP_GRUB_PASSWD_PLAINTEXT, ,grub,
+# Leave hash unset
+KP_GRUB_PASSWD_HASH,      ,,
 EOF
     fi
-
-	# Add this to put editors into makefile mode.
-    cat <<EOF >>  ${fileName}	
-#-------------------------------------------------------------------------------
-#
-# Local Variables:
-# mode: makefile-gmake
-# End:
 	
-EOF
+	# Add this to put editors into makefile mode.
+	# Echo it so editors editing _this_ file don't interpret it.
+	echo "#-------------------------------------------------------------------------------" >> ${fileName}
+	echo "#" >> ${fileName}
+	echo "# Local Variables:" >> ${fileName}
+	echo "# mode: makefile-gmake" >> ${fileName}
+	echo "# End:" >> ${fileName}
+
     echo ""
     echo "Created: [ $fileName ]"
     echo ""

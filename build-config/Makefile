@@ -350,16 +350,22 @@ SECURE_BOOT_ENABLE ?= no
 # Signed grub config, initrd, passwords, etc.
 SECURE_BOOT_EXT ?= no
 
+# Grub will validate files it loads, has password.
+SECURE_GRUB = no
+
 # If initrd verification included, check key variables
 # This uses gpg keys, which Secure Boot doesn't.
 ifeq ($(SECURE_BOOT_EXT),yes)
 # Secure Boot is a pre requisite for secure boot extended
   SECURE_BOOT_ENABLE = yes
-  ifeq ($(GPG_SIGN_PUBRING),)
-    $(error GPG_SIGN_PUBRING key location is not set. Use encryption-tool.sh to generate a new signing-key-paths.make file.)
-  endif
-  ifeq ($(GPG_SIGN_SECRING),)
-    $(error GPG_SIGN_SECRING key location is not set. Use encryption-tool.sh to generate a new signing-key-paths.make file.)
+
+  ifeq ($(SECURE_GRUB),yes)	
+    ifeq ($(GPG_SIGN_PUBRING),)
+      $(error GPG_SIGN_PUBRING key location is not set. Use encryption-tool.sh to generate a new signing-key-paths.make file.)
+    endif
+    ifeq ($(GPG_SIGN_SECRING),)
+      $(error GPG_SIGN_SECRING key location is not set. Use encryption-tool.sh to generate a new signing-key-paths.make file.)
+    endif
   endif
 endif
 

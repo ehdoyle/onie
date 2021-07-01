@@ -144,7 +144,8 @@ ifeq ($(SECURE_BOOT_ENABLE),yes)
 		--cert $(ONIE_VENDOR_CERT_PEM) \
 		--output $(KERNEL_VMLINUZ) $(KERNEL_VMLINUZ).unsigned
 endif
-ifeq ($(SECURE_BOOT_EXT),yes)
+ifeq ($(SECURE_GRUB),yes)
+	# Create detached gpg signatures for GRUB to validate files with.
 	$(Q) echo "==== GPG sign vmlinuz ===="
 	$(Q) fakeroot -- $(SCRIPTDIR)/gpg-sign.sh $(GPG_SIGN_SECRING) ${KERNEL_VMLINUZ}
 	$(Q) ln -sf $(KERNEL_VMLINUZ_SIG) $(UPDATER_VMLINUZ_SIG)

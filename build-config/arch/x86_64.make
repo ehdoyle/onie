@@ -96,9 +96,9 @@ UPDATER_IMAGE_PARTS = $(UPDATER_VMLINUZ) $(UPDATER_INITRD) $(UPDATER_ONIE_TOOLS)
 			$(ROOTCONFDIR)/grub-arch/sysroot-lib-onie/onie-blkdev-common \
 			$(ROOTCONFDIR)/grub-arch/sysroot-lib-onie/nos-mode-arch
 
-# Include linux image and initrd detached signatures,
-#  if Secure Boot Extended is active.
-ifeq ($(SECURE_BOOT_EXT),yes)
+# Include linux image and initrd detached signatures for grub to
+# verify, if secure grub is active
+ifeq ($(SECURE_GRUB),yes)
   UPDATER_IMAGE_PARTS += $(UPDATER_VMLINUZ).sig $(UPDATER_INITRD).sig
 endif
 
