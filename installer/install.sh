@@ -163,6 +163,7 @@ set_default_passwd()
 	#  The template defaults to setting an empty password.
     mkdir -p $onie_root_dir/config/etc
     cat<< EOF > "$onie_root_dir/config/etc/passwd"
+# install.sh default password
 root::0:0:root:/root:/bin/sh
 EOF
 

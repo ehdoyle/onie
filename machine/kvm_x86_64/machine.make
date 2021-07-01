@@ -61,10 +61,11 @@ SKIP_ETHMGMT_MACS = yes
 SECURE_BOOT_ENABLE = yes
 
 # Enable extended secure boot:
-#  Signed initrd, grub configs, passwords, etc...
-SECURE_BOOT_EXT = no
+#  Onie password
+SECURE_BOOT_EXT = yes
 
 # Grub validates files, uses a password if yes
+# Requires secure boot
 SECURE_GRUB = no
 
 # Console parameters can be defined here (default values are in
@@ -99,6 +100,11 @@ SAFE_PLACE       = $(ENCRYPTIONDIR)/safe-place
 # Secure boot extended requires secure boot to be active.
 # This will enable onie/grub passwords, detached signatures, etc
 ifeq ($(SECURE_BOOT_EXT),yes)
+	SECURE_BOOT_ENABLE = yes
+endif
+
+# Secure GRUB requires secure boot
+ifeq ($(SECURE_GRUB),yes)
 	SECURE_BOOT_ENABLE = yes
 endif
 

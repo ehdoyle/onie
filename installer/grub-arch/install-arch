@@ -547,7 +547,7 @@ install_grub_config()
     if [ -r $boot_dir/onie/grub/grub-variables ] ; then
         . $boot_dir/onie/grub/grub-variables
     fi
-    if [ "$image_secure_boot_ext" = "yes" ] ; then
+    if [ "$image_secure_grub" = "yes" ] ; then
         /bin/cp grub_sb.cfg $grub_root_dir/grub.cfg || {
             echo "ERROR: copying grub config to destatition: $grub_root_dir"
             exit 1
@@ -703,9 +703,9 @@ install_uefi_shim_grub()
         echo "ERROR: Unable to determine UUID of GRUB boot directory: $boot_dir"
         return 1
     }
-    # Run this only if secure boot is enabled but secure_boot_extended is disabled
+    # Run this only if secure boot is enabled but secure_grub is disabled
     #
-    if [ "$image_secure_boot" = "yes" ] && [ -z $image_secure_boot_ext ]; then
+    if [ "$image_secure_boot" = "yes" ] && [ -z $image_secure_grub ]; then
         # Generate tiny grub config for monolithic image
         cat<< EOF > "${loader_dir}/grub.cfg"
 search.fs_uuid $onie_boot_uuid root hd0,gpt$onie_boot_part
@@ -859,7 +859,7 @@ install_image()
         echo "Error: Unable to copy ONIE initrd to $onie_root_dir/$initrd_name"
         exit 1
     }
-    if [ "$image_secure_boot_ext" = "yes" ] ; then
+    if [ "$image_secure_grub" = "yes" ] ; then
         cp onie.vmlinuz.sig $onie_root_dir/$kernel_signature || {
             echo "ERROR: problems installing kernel signature on: $boot_dev"
             exit 1

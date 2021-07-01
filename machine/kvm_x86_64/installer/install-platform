@@ -14,12 +14,17 @@ test_install_sharing()
 
 set_default_passwd()
 {
-    # Set default user password to 'onie' for kvm_x86_64
-    echo "Set default password to $onie_root_dir/config/etc/passwd"
-    mkdir -p $onie_root_dir/config/etc
-    cat<< EOF > "$onie_root_dir/config/etc/passwd"
-root:lLaehaKdHCGzc:0:0:root:/root:/bin/sh
-EOF
+	#
+	# Use the platform specific passwd-secured file to
+	# set the ONIE password. Store this file in
+	# /mnt/onie-boot/config/etc/passwd and link to it
+    if [ ! -e $onie_config_dir/etc/passwd ]; then
+        mkdir -p $onie_config_dir/etc
+        cp /etc/passwd-secured $onie_config_dir/etc/passwd
+    fi
+    rm -f /etc/passwd
+    ln -s $onie_config_dir/etc/passwd /etc/passwd
+
 }
 
 # Test of the installer file sharing mechanism
