@@ -63,13 +63,17 @@ set -e
 # Create tmp folder for new db
 tmp_dir=$(mktemp -d -t gpg-XXXXXXXXXX)
 
-GPG_KEY_ID=$(gpg --openpgp --homedir "${tmp_dir}" --import "${GPG_SIGN_SECRING}" 2>&1 | \
-				 grep -m 1 "gpg: key "| sed -e 's/.*key \(.*\): .*/\1/')
+GPG_KEY_ID=$(gpg --openpgp \
+				 --homedir "${tmp_dir}" \
+				 --import "${GPG_SIGN_SECRING}" 2>&1 | \
+				 grep -m 1 "gpg: key " | \
+				 sed -e 's/.*key \(.*\): .*/\1/')
+
 echo "GPG signing $FILE with $GPG_SIGN_SECRING, key id $GPG_KEY_ID"
 
 gpg -v --homedir ${tmp_dir} --default-key "${GPG_KEY_ID}" --yes --detach-sign --output ${FILE}.sig  ${FILE}
 
-echo "ALEX created detached signature $(pwd) ${FILE}.sig "
+echo "gpg-sign.sh created detached signature $(pwd) ${FILE}.sig "
 
 # Clear tmp folder
 rm -rf $tmp_dir
