@@ -280,7 +280,6 @@ $(SYSROOT_COMPLETE_STAMP): $(SYSROOT_CHECK_STAMP)
 	     fi
 	$(Q) if [ -d $(MACHINEDIR)/rootconf/sysroot-etc ] ; then \
 		cp -ar $(MACHINEDIR)/rootconf/sysroot-etc/* $(SYSROOTDIR)/etc/ ; \
-		cp -ar $(MACHINEDIR)/rootconf/sysroot-etc/* $(SYSROOTDIR)/etc/ ; \
 	     fi
 ifeq ($(SECURE_BOOT_EXT),yes)
 # Require login and set /etc/passwd file to be the same as machine's passwd-secured
