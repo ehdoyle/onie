@@ -947,11 +947,12 @@ install_image()
     # update sys_eeprom
     update_syseeprom
 	
-    # Set root account password, if Secure Boot Extended is active
+    # Set root account password:
+	# if Secure Boot Extended is active and it is a UEFI system.
 	# This is overridden by
 	#  onie/machine/<manufactuer>/<machine>/installer/install-platform
 	#  See that file for password details.
-    if [ "$image_secure_boot_ext" = "yes" ] ; then
+    if [ "$image_secure_boot_ext" = "yes" ]  && [ "$install_firmware" = "uefi" ] ; then	
         set_default_passwd
     fi
 
