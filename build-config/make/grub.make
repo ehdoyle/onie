@@ -371,15 +371,14 @@ grub-host-clean:
 grub-install-sb: $(GRUB_INSTALL_SB_STAMP)
 $(GRUB_INSTALL_SB_STAMP): $(SBSIGNTOOL_INSTALL_STAMP) $(GRUB_INSTALL_STAMP) $(GRUB_HOST_INSTALL_STAMP)
 	$(Q) echo "====  Building grub-$(ARCH)-efi-$(GRUB_VERSION) monolithic secure boot image ===="
-	$(Q) rm -rf $(SYSROOTDIR)/usr/lib/grub/$(ARCH)-efi
+# Grub generates detached signatures 
 	$(Q) $(SCRIPTDIR)/mk-grub-efi-image $(ARCH) $(GRUB_HOST_BIN_UEFI_DIR) \
-		$(GRUB_TARGET_LIB_UEFI_DIR) $(GRUB_MONOLITH_IMAGE)
-	$(Q) echo "=== Secure Boot: grub.make  $(GRUB_SECURE_BOOT_IMAGE) sbsign --key $(ONIE_VENDOR_SECRET_KEY_PEM) \
-		--cert $(ONIE_VENDOR_CERT_PEM) \
-		--output $(GRUB_SECURE_BOOT_IMAGE) $(GRUB_MONOLITH_IMAGE)"
-	$(Q) sbsign --key $(ONIE_VENDOR_SECRET_KEY_PEM) \
-		--cert $(ONIE_VENDOR_CERT_PEM) \
-		--output $(GRUB_SECURE_BOOT_IMAGE) $(GRUB_MONOLITH_IMAGE)
+		$(GRUB_TARGET_LIB_UEFI_DIR) $(GRUB_MONOLITH_IMAGE) \
+		$(SECURE_GRUB) \
+		$(GPG_SIGN_PUBRING) $(GRUB_USER) $(GRUB_PASSWD_PLAINTEXT) $(GRUB_PASSWD_HASHED)
+	$(Q) echo "=== Secure Boot: Signing grub efi binaries "
+	$(Q) $(SCRIPTDIR)/efi-sign.sh $(ONIE_VENDOR_SECRET_KEY_PEM) \
+		$(ONIE_VENDOR_CERT_PEM) $(GRUB_MONOLITH_IMAGE) $(GRUB_SECURE_BOOT_IMAGE)
 	$(Q) echo "== Signed output grub from $(GRUB_MONOLITH_IMAGE) is at $(GRUB_SECURE_BOOT_IMAGE)"
 	$(Q) touch $@
 

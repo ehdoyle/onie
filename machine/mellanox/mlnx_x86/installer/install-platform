@@ -38,3 +38,13 @@ update_syseeprom()
         rm -f $syseeprom_log
     fi
 }
+
+set_default_passwd()
+{
+    # Set default user password
+    echo "Set default password to $onie_root_dir/config/etc/passwd"
+    mkdir -p $onie_root_dir/config/etc
+    cat<< EOF > "$onie_root_dir/config/etc/passwd"
+root:onBDLKVZazo1A:0:0:root:/root:/bin/sh
+EOF
+}

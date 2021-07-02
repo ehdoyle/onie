@@ -64,9 +64,9 @@ SECURE_BOOT_ENABLE = yes
 #  Onie password
 SECURE_BOOT_EXT = yes
 
-# Grub validates files, uses a password if yes
+# Enable GRUB verification of files and passwords
 # Requires secure boot
-SECURE_GRUB = no
+SECURE_GRUB = yes
 
 # Console parameters can be defined here (default values are in
 # build-config/arch/x86_64.make).
