@@ -182,8 +182,8 @@ function fxnHelp()
     echo "                              if date is supplied it will be added to the organizationalUnitName in the certificate."
     echo "                        This is 'generate-keys' times 3 with defaults."
     echo "                        Keys end up under onie/encryption/keys/"
-    echo "  generate-key-file <name> Create a CSV file that details where every key gets used. [ $DEFAULT_KEY_CONFIG_FILE]"
-    echo "  --key-config-file <name> Use this CSV file rather than the default [ $DEFAULT_KEY_CONFIG_FILE]"
+    echo "  generate-key-file <name> Create a CSV file that details where every key gets used. [ $DEFAULT_SECURITY_SETTINGS_FILE]"
+    echo "  --security-settings-file <name> Use this CSV file rather than the default [ $DEFAULT_SECURITY_SETTINGS_FILE]"
     echo "  update-keys           Have code recognize new key locations. Updates makefile fragment."
     echo ""
     echo " Informational commands:"
@@ -409,9 +409,9 @@ do
             exit
             ;;
 
-        --key-config-file )
+        --security-settings-file )
             # pass in csv file holding key locations
-            KEY_CONFIG_FILE="$2"
+            SECURITY_SETTINGS_FILE="$2"
             shift
             ;;
 

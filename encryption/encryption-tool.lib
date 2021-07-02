@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 
 #
-# SCRIPT_PURPOSE: Secure boot specific functions for KVM.
+# SCRIPT_PURPOSE: Handle operations for building secure ONIE components.
 #
 
 # onie/encryption
@@ -27,8 +27,8 @@ NEW_KEYS_DIR="${CRYPTO_DIR}/keys"
 EFI_VARS_DIR="${NEW_KEYS_DIR}/efiVars"
 
 # A file of paths to all keys used.
-KEY_CONFIG_FILE=""
-DEFAULT_KEY_CONFIG_FILE="${NEW_KEYS_DIR}/default-keys.csv"
+SECURITY_SETTINGS_FILE=""
+DEFAULT_SECURITY_SETTINGS_FILE="${NEW_KEYS_DIR}/default-security-settings.csv"
 #
 # Use existing USB_XFER_DIR to host keys that will have to be programmed
 # in to the UEFI bios
@@ -1123,19 +1123,19 @@ fxnReadKeyConfigFile()
 	local validatePath="TRUE"
 
     # If no key file name was supplied
-    if [ "$KEY_CONFIG_FILE" = "" ];then
+    if [ "$SECURITY_SETTINGS_FILE" = "" ];then
         # Generate a default to read
         fxnGenerateCSVKeyFile
-        KEY_CONFIG_FILE="$DEFAULT_KEY_CONFIG_FILE"
+        SECURITY_SETTINGS_FILE="$DEFAULT_SECURITY_SETTINGS_FILE"
     fi
-    if [ ! -e "$KEY_CONFIG_FILE" ];then
-        echo "ERROR! Failed to find key configuration file at [ $KEY_CONFIG_FILE ]"
+    if [ ! -e "$SECURITY_SETTINGS_FILE" ];then
+        echo "ERROR! Failed to find key configuration file at [ $SECURITY_SETTINGS_FILE ]"
         exit 1
     fi
     echo""
     echo "#####################################################"
     echo "#"
-    echo "# Reading key paths from [ ${PWD}/$KEY_CONFIG_FILE ]"
+    echo "# Reading key paths from [ ${PWD}/$SECURITY_SETTINGS_FILE ]"
     echo "#"
     echo "#####################################################"
     echo ""
@@ -1288,7 +1288,7 @@ fxnReadKeyConfigFile()
 			if [ "$validatePath" = "TRUE" ];then
 				# is the path valid?
 				if [ ! -e "$path" ];then
-					echo "ERROR! in [ $KEY_CONFIG_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
+					echo "ERROR! in [ $SECURITY_SETTINGS_FILE ] key [ $name ] has invalid path [ $path ]. Exiting."
 					echo ""
 					exit 1
 				fi
@@ -1296,7 +1296,7 @@ fxnReadKeyConfigFile()
         fi
 		# Default to checking paths
 		validatePath="TRUE"		
-    done < "$KEY_CONFIG_FILE"
+    done < "$SECURITY_SETTINGS_FILE"
 
 }
 
@@ -1412,7 +1412,7 @@ function fxnGenerateCSVKeyFile()
     local ThirdPartyKeyExchangeKey="${CRYPTO_DIR}/keys/SW/efi-keys/SW-key-exchange-key-cert.pem"
 
     if [ "$fileName" = "" ];then
-        fileName="$DEFAULT_KEY_CONFIG_FILE"
+        fileName="$DEFAULT_SECURITY_SETTINGS_FILE"
     fi
     # create a default file if none was specified, or return if this already happened.
     if [ -e "$fileName" ];then
@@ -1515,17 +1515,21 @@ EOF
     if [ "$ONIE_SECURE_BOOT_EXTENDED" = "TRUE" ];then
         cat <<EOF >>  ${fileName}
 
-# Secure Boot: extended
-# GPG Keys - used for signing kernel and grub in Extended Secure Boot
-KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-public.asc,
+# Secure GRUB settings
+# GPG Keys - used for signing files that GRUB loads
+KP_GPG_SIGN_PUBRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-pubring.kbx
 KP_GPG_SIGN_SECRING,    ,${CRYPTO_DIR}/keys/ONIE/gpg-keys/ONIE-secret.asc,
 
-# Grub
-KP_GRUB_USER,             ,onie,
-# Two ways of setting GRUB password
-KP_GRUB_PASSWD_PLAINTEXT, ,grub,
-# Leave hash unset
+# GRUB user
+KP_GRUB_USER,             ,root,
+
+# Set GRUB password
+#  By plaintext
+KP_GRUB_PASSWD_PLAINTEXT, ,onie,
+
+#  Or by supplying a hash (currently unset)
 KP_GRUB_PASSWD_HASH,      ,,
+
 EOF
     fi
 	
