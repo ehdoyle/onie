@@ -550,22 +550,33 @@ install_grub_config()
 	# Only if building Secure Grub for a UEFI system
     if [ "$image_secure_grub" = "yes" ] && [ "$install_firmware" = "uefi" ] ; then
 		# Copy the Secure Boot grub config over
-        /bin/cp grub_sb.cfg $grub_root_dir/grub.cfg || {
+        cp grub_sb.cfg $grub_root_dir/grub.cfg || {
             echo "ERROR: copying grub config to destatition: $grub_root_dir"
             exit 1
         }
 		# And detached signature
-        /bin/cp grub_sb.cfg.sig $grub_root_dir/grub.cfg.sig || {
+        cp grub_sb.cfg.sig $grub_root_dir/grub.cfg.sig || {
             echo "ERROR: copying grub config  sig to destatition: $grub_root_dir"
             exit 1
         }
 		# Copy the config for Secure boot disabled
-        /bin/cp grub.cfg /boot/efi/EFI/onie/grub.cfg || {
+        # Set the immutable bit to prevent modification of this file.
+		# Traditionally the NOS has been able to modify the grub.cfg.
+		# However, now that GRUB will be comparing it to a detached signature
+		# before loading it, any changes to that file will render the system
+		# unbootable.
+		if [ -e /boot/efi/EFI/onie/grub.cfg ];then
+			# If there is an existing install, overwrite it with a new
+			# copy that matches the signatures.
+			chattr -i /boot/efi/EFI/onie/grub.cfg
+		fi
+        chattr +i $grub_root_dir/grub.cfg		
+        cp grub.cfg /boot/efi/EFI/onie/grub.cfg || {
             echo "ERROR: copying grub config to destatition: /boot/efi/EFI/onie"
             exit 1
         }
 		# And detached signature		
-        /bin/cp grub.cfg.sig /boot/efi/EFI/onie/grub.cfg.sig || {
+        cp grub.cfg.sig /boot/efi/EFI/onie/grub.cfg.sig || {
             echo "ERROR: copying grub config to destatition: /boot/efi/EFI/onie"
             exit 1
         }
