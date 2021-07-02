@@ -160,13 +160,8 @@ set_default_passwd()
     # This function is a template, and it is expected that the
 	# machine's install-platform file will have an instance of
 	# this function to override it.
-	#  The template defaults to setting an empty password.
-    mkdir -p $onie_root_dir/config/etc
-    cat<< EOF > "$onie_root_dir/config/etc/passwd"
-# install.sh default password
-root::0:0:root:/root:/bin/sh
-EOF
-
+	#  The template defaults to doing nothing.
+    return 0
 }
 
 [ -r ./install-platform ] && . ./install-platform
