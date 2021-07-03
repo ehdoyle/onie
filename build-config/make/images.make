@@ -282,8 +282,14 @@ $(SYSROOT_COMPLETE_STAMP): $(SYSROOT_CHECK_STAMP)
 		cp -ar $(MACHINEDIR)/rootconf/sysroot-etc/* $(SYSROOTDIR)/etc/ ; \
 	     fi
 ifeq ($(SECURE_BOOT_EXT),yes)
-# Require login and set /etc/passwd file to be the same as machine's passwd-secured
+# Allow passwords to be disabled if Secure Boot is off.
+# Copy the console open that uses /bin/sh as onie-console-open
+	$(Q) cp $(SYSROOTDIR)/bin/onie-console $(SYSROOTDIR)/bin/onie-console-open
+# Create a secured version
 	$(Q) sed -i 's/exec \/bin\/sh -l/exec \/bin\/login/' $(SYSROOTDIR)/bin/onie-console
+# Save a copy of the secured.
+	$(Q) cp $(SYSROOTDIR)/bin/onie-console $(SYSROOTDIR)/bin/onie-console-secure
+# Apply machine specific ONIE password file
 	$(Q) if [ -e $(MACHINEDIR)/rootconf/sysroot-etc/passwd-secured ] ; then \
                 cp -a $(MACHINEDIR)/rootconf/sysroot-etc/passwd-secured $(SYSROOTDIR)/etc/passwd ; \
              fi
