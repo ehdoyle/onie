@@ -723,7 +723,7 @@ install_uefi_shim_grub()
     }
 
     # copy shim and grub binaries into loader directory
-    for f in shim mm grub ; do
+    for f in shim mm grub fb ; do
         local loader="${f}${image_uefi_arch}.efi"
         cp "$loader" $loader_dir || {
             echo "ERROR: Unable to copy loader file: $loader to loader_dir: $loader_dir"
