@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash 
 #-------------------------------------------------------------------------------
 #
 #  Copyright (C) 2021 Alex Doyle <adoyle@nvidia.com>
@@ -197,6 +197,7 @@ function fxnHelp()
     echo "   --m-onie-iso <path>    - Boot off of recovery ISO at <path> and install onto qcow2"
     echo "   --m-embed-onie         - Boot to embed onie. Requires --m-onie-iso <path>"
     echo "   --m-boot-cd            - Boot off of rescue CD to start."
+	echo "   --m-mount-cd           - CD is accessible when booting off hard drive."
     echo "   --m-secure             - Set --m-usb-drive and --m-bios-uefi for secure boot."
     echo ""
     echo "  BIOS configuration:     Default: Legacy BIOS."
@@ -445,7 +446,15 @@ function fxnRunEmulation()
 
     if [ "$DO_BOOT_FROM_CD" = "TRUE" ];then
         BOOT_LINE=" -boot $boot $cdrom "
-    fi
+	else
+		# Not booting off cd, but keeping it accessible from the hard drive
+		if [ "$DO_MOUNT_CD" = "TRUE" ];then
+			# For QEMU, treat the ISO as another virtio drive.
+			# Device shows up, but can't be read.
+			# Probably need kernel support to mount it.
+			CD_DRIVE_LINE=" -drive file=$CDROM,media=cdrom,if=virtio,index=2 "
+		fi
+	fi
     RUN_COMMAND="qemu-system-x86_64 --enable-kvm \
          -m $QEMU_MEMORY_M \
          -name onie \
@@ -455,6 +464,7 @@ function fxnRunEmulation()
          $NETWORK_LINE \
          $BOOT_LINE \
          $DRIVE_LINE \
+		 $CD_DRIVE_LINE \
          $USB_DRIVE_LINE \
          -nographic \
          -serial telnet:localhost:$QEMU_TELNET_PORT,server"
@@ -954,6 +964,11 @@ do
             DO_BOOT_FROM_CD="TRUE"
             ;;
 
+        --m-mount-cd )
+            # Boot from hard drive, but make cd available
+            DO_MOUNT_CD="TRUE"
+            ;;
+		
         --m-usb-drive )
             # Copy everything out of USB_TRANSFER_DIR, and put it on a
             # QCOW2 filesystem that will present as a USB drive.
@@ -1028,8 +1043,10 @@ done
 
 #
 # Sanity checking.
+# If a virtual CD is being booted from, or made avaliable
+# after a hard drive boot, make sure it exists.
 #
-if [ "$DO_BOOT_FROM_CD" = "TRUE" ];then
+if [ "$DO_BOOT_FROM_CD" = "TRUE" ] || [ "$DO_MOUNT_CD"  = "TRUE" ];then
     if [ ! -e "$ONIE_RECOVERY_ISO" ];then
         echo "ERROR! --m-embed-onie requires an --m-onie-iso image specified."
         echo " Perhaps $( realpath "${BUILD_DIR}"/images/onie-recovery-"${ONIE_MACHINE_TARGET}"*iso )"
