@@ -5,7 +5,7 @@
 #  SPDX-License-Identifier:     GPL-2.0
 
 set -e
-set -x
+
 #
 # Sign efi file with onie vendor secret key and certificate
 # - shim (only for tests)

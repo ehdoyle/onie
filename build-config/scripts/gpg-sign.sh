@@ -50,7 +50,7 @@ if [ $(( GPG_DIR_LEN > 80 )) = 1 ];then
 else
 	echo "Path to file is [ $GPG_DIR_LEN ] (less than 80)  characters. Proceeding."
 fi
-set -x
+
 # Kill gpg agent to prevent sporadic gpg errors, related to running script in combination with fakeroot
 if [  "$(pgrep gpg-agent )" ];then
 	echo "Running $( ps waxf | grep -v grep | grep gpg-agent )"
