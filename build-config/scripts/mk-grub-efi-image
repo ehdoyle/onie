@@ -114,6 +114,7 @@ GRUB_ENCRYPTION_MODULES=" 	fshelp
 	crypto
 	bufio
 	archelp
+	is_sb_enabled
 "
 
 
